@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { storage } from "@/src/utils/storage";
-import type { CartItem } from "./types";
+import type { CartItem, OrderType } from "./types";
 
 interface CartCtx {
   items: CartItem[];
@@ -16,6 +16,8 @@ interface CartCtx {
   hasAlcohol: boolean;
   myOrderIds: string[];
   addMyOrder: (id: string) => void;
+  orderType: OrderType;
+  setOrderType: (t: OrderType) => void;
 }
 
 const Ctx = createContext<CartCtx | null>(null);
@@ -27,6 +29,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [generalNote, setGeneralNote] = useState("");
   const [myOrderIds, setMyOrderIds] = useState<string[]>([]);
+  const [orderType, setOrderType] = useState<OrderType>("pickup");
   const loaded = useRef(false);
 
   useEffect(() => {
@@ -78,8 +81,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       hasAlcohol: items.some((i) => i.is_alcohol),
       myOrderIds,
       addMyOrder,
+      orderType,
+      setOrderType,
     };
-  }, [items, generalNote, addItem, updateItem, removeItem, clear, myOrderIds, addMyOrder]);
+  }, [items, generalNote, addItem, updateItem, removeItem, clear, myOrderIds, addMyOrder, orderType]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -8,6 +8,7 @@ import Animated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useActiveOrders } from "@/src/api";
+import { useStaff } from "@/src/staff-auth";
 import { Chip, Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
 import { OrderCard, OrderDetail } from "@/src/components/staff-order";
 import type { Order } from "@/src/types";
@@ -21,6 +22,7 @@ export default function StaffDashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t } = useI18n();
+  const { lock } = useStaff();
   const { width } = useWindowDimensions();
   const twoCol = width >= 900;
   const { data, isLoading } = useActiveOrders(3000);
@@ -72,14 +74,15 @@ export default function StaffDashboard() {
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Pressable testID="staff-back" onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} style={styles.iconBtn}><Feather name="arrow-left" size={20} color={colors.onSurface} /></Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title} testID="staff-dashboard-title">{t("dashboard")}</Text>
-          <Text style={styles.subtitle}>Hallo Magic Pizza · iPhone + Android + Web</Text>
+          <Text style={styles.title} testID="staff-dashboard-title" numberOfLines={1}>{t("dashboard")}</Text>
+          <Text style={styles.subtitle} numberOfLines={1}>iPhone · Android · Web</Text>
         </View>
         <Pressable testID="staff-sound-toggle" onPress={() => setSoundOn((v) => !v)} style={[styles.iconBtn, soundOn && styles.iconBtnOn]}>
           <Feather name={soundOn ? "volume-2" : "volume-x"} size={20} color={soundOn ? colors.onBrandPrimary : colors.onSurface} />
         </Pressable>
         <Pressable testID="staff-go-kitchen" onPress={() => router.push("/staff/kitchen")} style={styles.iconBtn}><Feather name="coffee" size={20} color={colors.onSurface} /></Pressable>
         <Pressable testID="staff-go-admin" onPress={() => router.push("/staff/admin")} style={styles.iconBtn}><Feather name="settings" size={20} color={colors.onSurface} /></Pressable>
+        <Pressable testID="staff-lock" onPress={() => { lock(); router.replace("/(tabs)/more"); }} style={styles.iconBtn}><Feather name="lock" size={18} color={colors.onSurface} /></Pressable>
       </View>
 
       {/* Alert banner */}

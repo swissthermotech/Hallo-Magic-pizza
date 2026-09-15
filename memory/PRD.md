@@ -33,6 +33,11 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Admin: products list with AVAILABLE/SOLD OUT switch (instant on all clients), bilingual product editor (names, descriptions, price, sizes, ingredients, allergens, photo URL, allowed extras, dough options), extras manager, restaurant settings (closure, pickup/delivery on/off, min order, fee, zones, hours).
 - Testing: backend 21/21 pytest (`/app/backend/tests/test_hallo_magic_pizza.py`, run with `-n 0`), frontend E2E passed.
 
+## Implemented (2026-06) – design refinement round 2
+- Premium homepage: full-bleed hero + "Commander maintenant" CTA, large Retrait/Livraison selector (shared with checkout), compact category rail, editorial image-first product cards with clear "Personnaliser" / "Ajouter" actions, dark summary card in cart, taller product hero with overlapping sheet, refined tab bar.
+- Staff area separated & protected: hidden from customers (small "Accès restaurant" link in Plus tab), PIN gate at `/staff/login` (PIN from `EXPO_PUBLIC_STAFF_PIN` in frontend/.env, default 1234, remembered on device; lock button in dashboard header).
+- Direct staff URL: `<preview-url>/staff` (redirects to `/staff/login` until unlocked). Kitchen `/staff/kitchen`, Admin `/staff/admin`.
+
 ## Backlog
 - P0: PrintNode live credentials + real ESC/POS ticket test on Epson TM-T70II; staff PIN protection.
 - P1: real push notifications (Emergent push after build), customer accounts (saved address, history, reorder, favourites), web layout polish for desktop widths, photo upload via object storage instead of URL, category manager UI, extras per-size pricing.

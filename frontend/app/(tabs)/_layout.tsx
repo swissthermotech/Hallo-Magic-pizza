@@ -39,12 +39,12 @@ export default function TabsLayout() {
   }
 
   const icon = (name: React.ComponentProps<typeof Feather>["name"], badge?: number) => {
-    const TabIcon = ({ color }: { color: ColorValue }) => (
-      <View style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center" }}>
-        <Feather name={name} size={22} color={color as string} />
+    const TabIcon = ({ color, focused }: { color: ColorValue; focused: boolean }) => (
+      <View style={{ width: 52, height: 32, alignItems: "center", justifyContent: "center", borderRadius: 16, backgroundColor: focused ? colors.brandSoft : "transparent" }}>
+        <Feather name={name} size={21} color={color as string} />
         {badge ? (
-          <View style={{ position: "absolute", top: -4, right: -8, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", paddingHorizontal: 4 }}>
-            <Text style={{ color: colors.onBrandPrimary, fontSize: 11, fontWeight: "800", fontFamily: FONT_TEXT }}>{badge}</Text>
+          <View style={{ position: "absolute", top: -2, right: 6, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center", paddingHorizontal: 4, borderWidth: 2, borderColor: colors.surfaceSecondary }}>
+            <Text style={{ color: colors.onBrandPrimary, fontSize: 10, fontWeight: "800", fontFamily: FONT_TEXT }}>{badge}</Text>
           </View>
         ) : null}
       </View>
@@ -58,15 +58,15 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.brandPrimary,
         tabBarInactiveTintColor: colors.muted,
-        tabBarStyle: { backgroundColor: colors.surfaceSecondary, borderTopColor: colors.border, ...(Platform.OS === "web" ? { height: 64 } : {}) },
+        tabBarStyle: { backgroundColor: colors.surfaceSecondary, borderTopColor: colors.border, borderTopWidth: 1, ...(Platform.OS === "web" ? { height: 64 } : {}) },
         tabBarItemStyle: { alignSelf: "center" },
-        tabBarLabelStyle: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "600" },
+        tabBarLabelStyle: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "700", letterSpacing: 0.3 },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: t("menu"), tabBarIcon: icon("grid"), tabBarButtonTestID: "tab-menu" }} />
+      <Tabs.Screen name="index" options={{ title: t("menu"), tabBarIcon: icon("home"), tabBarButtonTestID: "tab-menu" }} />
       <Tabs.Screen name="cart" options={{ title: t("cart"), tabBarIcon: icon("shopping-bag", count), tabBarButtonTestID: "tab-cart" }} />
       <Tabs.Screen name="orders" options={{ title: t("orders"), tabBarIcon: icon("clock"), tabBarButtonTestID: "tab-orders" }} />
-      <Tabs.Screen name="more" options={{ title: t("more"), tabBarIcon: icon("more-horizontal"), tabBarButtonTestID: "tab-more" }} />
+      <Tabs.Screen name="more" options={{ title: t("more"), tabBarIcon: icon("user"), tabBarButtonTestID: "tab-more" }} />
     </Tabs>
   );
 }

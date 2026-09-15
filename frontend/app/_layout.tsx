@@ -11,6 +11,7 @@ import { ErrorBoundary } from "@/src/components/error-boundary";
 import { queryClient } from "@/src/query-client";
 import { LanguageProvider } from "@/src/i18n";
 import { CartProvider } from "@/src/cart";
+import { StaffProvider } from "@/src/staff-auth";
 import { ToastProvider } from "@/src/components/ui";
 import { themes } from "@/src/theme";
 
@@ -44,6 +45,7 @@ export default function RootLayout() {
             <KeyboardProvider>
               <LanguageProvider>
                 <CartProvider>
+                  <StaffProvider>
                   <ToastProvider>
                     <StatusBar style="dark" />
                     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themes.light.surface } }}>
@@ -54,6 +56,7 @@ export default function RootLayout() {
                       <Stack.Screen name="staff" />
                     </Stack>
                   </ToastProvider>
+                  </StaffProvider>
                 </CartProvider>
               </LanguageProvider>
             </KeyboardProvider>

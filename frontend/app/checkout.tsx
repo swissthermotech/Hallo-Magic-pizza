@@ -11,6 +11,7 @@ import { useMenu, usePlaceOrder } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { chf } from "@/src/format";
 import { Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
+import { OrderTypeSelector } from "./(tabs)/index";
 import type { OrderType } from "@/src/types";
 
 function timeSlots(): string[] {
@@ -36,7 +37,7 @@ export default function CheckoutScreen() {
   const settings = data?.settings;
   const place = usePlaceOrder();
 
-  const [type, setType] = useState<OrderType>(settings?.pickup_enabled === false ? "delivery" : "pickup");
+  const type: OrderType = cart.orderType;
   const [timeMode, setTimeMode] = useState<"asap" | "scheduled">("asap");
   const [time, setTime] = useState<string>("");
   const [f, setF] = useState({ first_name: "", last_name: "", phone: "", email: "", street: "", number: "", npa: "", city: "", instructions: "" });
@@ -89,17 +90,7 @@ export default function CheckoutScreen() {
       <ScreenHeader title={t("checkout")} subtitle={`${cart.count} ${t("items").toLowerCase()} · ${chf(goods)}`} testID="checkout-title" />
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: CTA_H + 16, gap: 20 }} bottomOffset={CTA_H + 16} showsVerticalScrollIndicator={false}>
         {/* Order type */}
-        <View style={styles.segment} testID="order-type-segment">
-          {(["pickup", "delivery"] as OrderType[]).map((tp) => {
-            const enabled = tp === "pickup" ? settings?.pickup_enabled !== false : settings?.delivery_enabled !== false;
-            return (
-              <Pressable key={tp} testID={`order-type-${tp}`} disabled={!enabled} onPress={() => setType(tp)} style={[styles.segBtn, type === tp && styles.segBtnActive, !enabled && { opacity: 0.4 }]}>
-                <Feather name={tp === "pickup" ? "shopping-bag" : "truck"} size={18} color={type === tp ? colors.onSurfaceInverse : colors.onSurface} />
-                <Text style={[styles.segText, type === tp && styles.segTextActive]}>{t(tp).toUpperCase()}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <OrderTypeSelector />
         {type === "delivery" && settings ? (
           <Text style={[styles.hint, (belowMin || zoneMissing) && { color: colors.error }]} testID="delivery-min-hint">
             {zoneMissing

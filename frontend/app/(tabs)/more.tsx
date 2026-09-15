@@ -42,6 +42,12 @@ export default function MoreScreen() {
       </View>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 20 }}>
         <View>
+          <Text style={styles.section}>{t("myOrders")}</Text>
+          <View style={styles.card}>
+            <Row icon="clock" label={t("myOrders")} onPress={() => router.push("/(tabs)/orders")} testID="more-my-orders" />
+          </View>
+        </View>
+        <View>
           <Text style={styles.section}>{t("language")}</Text>
           <View style={styles.card}>
             {(["fr", "de"] as const).map((l, i) => (
@@ -68,16 +74,10 @@ export default function MoreScreen() {
           </View>
         ) : null}
 
-        <View>
-          <Text style={styles.section}>{t("staffArea")}</Text>
-          <View style={styles.card}>
-            <Row icon="monitor" label={t("dashboard")} sub="iPhone · Android · Web" onPress={() => router.push("/staff")} testID="more-staff-dashboard" />
-            <View style={styles.sep} />
-            <Row icon="coffee" label={t("kitchen")} onPress={() => router.push("/staff/kitchen")} testID="more-staff-kitchen" />
-            <View style={styles.sep} />
-            <Row icon="settings" label={t("admin")} onPress={() => router.push("/staff/admin")} testID="more-staff-admin" />
-          </View>
-        </View>
+        <Pressable testID="more-staff-access" onPress={() => router.push("/staff/login")} style={styles.staffLink}>
+          <Feather name="lock" size={13} color={colors.muted} />
+          <Text style={styles.footer}>{t("staffAccess")}</Text>
+        </Pressable>
         <Text style={styles.footer}>Hallo Magic Pizza · {tx({ fr: "Version test", de: "Testversion" })} · CHF</Text>
       </ScrollView>
     </View>
@@ -120,4 +120,5 @@ const useStyles = makeStyles((colors) => ({
   day: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.muted },
   hours: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.onSurface, fontWeight: "600" },
   footer: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted, textAlign: "center" },
+  staffLink: { flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: 10, marginTop: 12 },
 }));
