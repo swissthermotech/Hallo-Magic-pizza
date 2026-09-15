@@ -314,6 +314,27 @@ class OrderIn(BaseModel):
     language: str = "fr"
 
 
+PAYMENT_METHODS = {
+    "pay_at_pickup": ("PAIEMENT AU RETRAIT", "Paiement au retrait"),
+    "pay_at_delivery": ("PAIEMENT A LA LIVRAISON", "Paiement à la livraison"),
+    "cash": ("ESPECES", "Espèces"),
+    "terminal": ("TERMINAL (CARTE)", "Terminal (carte)"),
+}
+
+
+def payment_label(o: dict, upper: bool) -> str:
+    pm = o.get("payment_method") or ("pay_at_pickup" if o["type"] == "pickup" else "pay_at_delivery")
+    return PAYMENT_METHODS.get(pm, PAYMENT_METHODS["pay_at_pickup"])[0 if upper else 1]
+
+
+class PhoneOrderIn(OrderIn):
+    """Order entered by restaurant staff on an iPad ("Poste 1" / "Poste 2") while the customer is on the phone."""
+    station: int = 1
+    payment_method: str = "pay_at_pickup"
+    customer_id: Optional[str] = None  # customers collection (= users) – links the order to the caller
+    minutes: Optional[int] = None      # preparation estimate when requested_time is "asap" (default 30)
+
+
 class OrderExtra(BaseModel):
     extra_id: str
     name: I18n
@@ -385,6 +406,8 @@ class Order(BaseDocument):
     age_confirmed: bool = False
     age_required: Optional[int] = None  # 16 (beer/wine) or 18 (spirits) – staff/driver must check ID at handover
     user_id: Optional[str] = None       # customer account (None = guest)
+    station: Optional[int] = None       # phone orders: iPad "Poste 1" / "Poste 2"
+    driver: Optional[str] = None        # delivery: "Livreur 1" / "Livreur 2" / "Livreur 3"
     subtotal: float
     extras_total: float
     delivery_fee: float
@@ -673,8 +696,9 @@ def required_age(products: List[dict]) -> Optional[int]:
     return max(ages) if ages else None
 
 
-@api.post("/orders", response_model=Order)
-async def create_order(body: OrderIn, request: Request, user: Optional[dict] = Depends(auth_mod.optional_user)):
+async def compute_order(body: OrderIn, user: Optional[dict]) -> Order:
+    """Validates the cart against the live catalog and builds the full Order (prices + frozen VAT snapshot).
+    Shared by customer checkout (/orders) and staff phone orders (/phone-orders)."""
     settings = await get_settings()
     if settings.temporarily_closed:
         raise HTTPException(400, "Restaurant temporarily closed")
@@ -778,7 +802,7 @@ async def create_order(body: OrderIn, request: Request, user: Optional[dict] = D
 
     number = await next_order_number()
     ts = now_utc()
-    order = Order(
+    return Order(
         order_number=number, type=body.type, source=body.source, status="pending", items=items,
         customer=body.customer, address=body.address if body.type == "delivery" else None,
         requested_time=body.requested_time, general_note=body.general_note or None,
@@ -791,10 +815,70 @@ async def create_order(body: OrderIn, request: Request, user: Optional[dict] = D
         created_at=ts, status_history=[StatusEvent(status="pending", at=ts)],
         notifications=[Notification(**make_notification("order_received", number))],
     )
+
+
+@api.post("/orders", response_model=Order)
+async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.optional_user)):
+    order = await compute_order(body, user)
     res = await db.orders.insert_one(order.to_mongo())
     if user and body.save_address and body.type == "delivery" and body.address:
         await auth_mod.save_address_for_user(user, body.address.model_dump())
     return Order.from_mongo(await db.orders.find_one({"_id": res.inserted_id}))
+
+
+@api.post("/phone-orders", response_model=Order)
+async def create_phone_order(body: PhoneOrderIn):
+    """Staff-entered phone order: same catalog, prices, VAT snapshot, ticket and receipt as any other order.
+    Created directly as ACCEPTED (staff confirmed it on the phone) and printed once immediately."""
+    if body.station not in (1, 2):
+        raise HTTPException(400, "station must be 1 or 2")
+    if body.payment_method not in PAYMENT_METHODS:
+        raise HTTPException(400, "Invalid payment method")
+    customer = await db.users.find_one({"_id": oid(body.customer_id)}) if body.customer_id else None
+    body.source = "telephone"
+    body.age_confirmed = True  # staff informs the caller; the 16+/18+ ID check happens at handover (ticket + dashboard warning)
+    order = await compute_order(body, customer)
+    ts = now_utc()
+    if body.requested_time and body.requested_time != "asap":
+        ready = parse_local_time(body.requested_time)
+        minutes = max(0, int((ready - ts).total_seconds() // 60))
+    else:
+        minutes = body.minutes if body.minutes is not None else 30
+        ready = ts + timedelta(minutes=minutes)
+    doc = order.to_mongo()
+    doc.update({
+        "status": "accepted", "station": body.station, "payment_method": body.payment_method, "accepted_at": ts,
+        "estimated_minutes": minutes, "estimated_ready_at": ready, "time_changed": False,
+        "status_history": [StatusEvent(status="pending", at=ts).model_dump(), StatusEvent(status="accepted", at=ts).model_dump()],
+        "notifications": [make_notification("order_received", order.order_number), make_notification("order_accepted", order.order_number, t=fmt_time(ready))],
+    })
+    res = await db.orders.insert_one(doc)
+    if customer and body.save_address and body.type == "delivery" and body.address:
+        await auth_mod.save_address_for_user(customer, body.address.model_dump())
+    # One kitchen print job (same pipeline / duplicate guard as the dashboard "accept")
+    try:
+        await do_print(await load_order(str(res.inserted_id)), force=False)
+    except HTTPException:
+        pass
+    return Order.from_mongo(await load_order(str(res.inserted_id)))
+
+
+class AssignIn(BaseModel):
+    driver: str  # "Livreur 1" | "Livreur 2" | "Livreur 3"
+
+
+@api.post("/orders/{order_id}/assign", response_model=Order)
+async def assign_driver(order_id: str, body: AssignIn):
+    doc = await load_order(order_id)
+    if doc["type"] != "delivery":
+        raise HTTPException(400, "Only delivery orders can be assigned")
+    if doc["status"] not in ("accepted", "preparing", "ready", "assigned"):
+        raise HTTPException(400, "Order cannot be assigned in its current status")
+    if doc["status"] in ("ready", "assigned"):
+        notif = make_notification("assigned", doc["order_number"]) if doc["status"] == "ready" else None
+        return await push_status(doc, "assigned", notif, {"driver": body.driver})
+    new = await db.orders.find_one_and_update({"_id": doc["_id"]}, {"$set": {"driver": body.driver}}, return_document=ReturnDocument.AFTER)
+    return Order.from_mongo(new)
 
 
 @api.get("/me/orders", response_model=List[Order])
@@ -1032,6 +1116,8 @@ def build_ticket(o: dict, settings: Settings) -> str:
     c = lambda s: s.center(W)  # noqa: E731
     lines += [c(settings.restaurant_name.upper()), "", c(f"COMMANDE #{o['order_number']}"), "=" * W]
     lines.append("RETRAIT" if o["type"] == "pickup" else "LIVRAISON")
+    if o.get("source") == "telephone":
+        lines.append(f"TELEPHONE - POSTE {o.get('station') or 1}")
     if o.get("requested_time") and o["requested_time"] != "asap":
         lines.append("SOUHAITE: " + o["requested_time"])
     if o.get("estimated_ready_at"):
@@ -1065,7 +1151,9 @@ def build_ticket(o: dict, settings: Settings) -> str:
     if o.get("delivery_fee"):
         lines.append(f"{'Livraison':<{W-10}}{('CHF %.2f' % o['delivery_fee']):>10}")
     lines.append(f"{'TOTAL:':<{W-12}}{('CHF %.2f' % o['total']):>12}")
-    lines += ["", c("PAIEMENT AU RETRAIT" if o["type"] == "pickup" else "PAIEMENT A LA LIVRAISON"), "", c("Merci / Danke!"), ""]
+    if o.get("driver"):
+        lines.append(f"LIVREUR: {o['driver'].upper()}")
+    lines += ["", c(payment_label(o, True)), "", c("Merci / Danke!"), ""]
     return "\n".join(lines)
 
 
@@ -1146,7 +1234,7 @@ def build_receipt(o: dict, s: Settings) -> str:
     if o.get("discount_gross"):
         lines.append(row("Remise", f"-{money(o['discount_gross'])}"))
     lines += ["=" * W, row("TOTAL", money(o["total"])), "=" * W,
-              "Paiement au retrait" if o["type"] == "pickup" else "Paiement à la livraison",
+              payment_label(o, False),
               "Statut: " + ("PAYÉ" if o.get("paid") else "à payer"), "", "TVA INCLUSE"]
     for g in o.get("vat_breakdown", []):
         lines += [f"TVA {g['rate']:.1f}%", row("  Base HT", money(g["net"])), row("  TVA", money(g["vat"]))]
@@ -1185,6 +1273,7 @@ async def print_receipt(order_id: str, body: PrintIn = PrintIn()):
 
 
 api.include_router(auth_mod.router)
+api.include_router(auth_mod.customers_router)
 api.include_router(photos_mod.router)
 app.include_router(api)
 

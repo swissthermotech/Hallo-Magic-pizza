@@ -5,7 +5,7 @@ import { Feather } from "@react-native-vector-icons/feather";
 import * as Haptics from "expo-haptics";
 import { makeStyles, useTheme } from "@/src/theme";
 import { statusLabel, useI18n } from "@/src/i18n";
-import { useOrderAction, usePrintTicket } from "@/src/api";
+import { useAssignDriver, useOrderAction, usePrintTicket } from "@/src/api";
 import { chf, elapsedMinutes, fmtTime, statusTone } from "@/src/format";
 import { Badge, Button, FONT_DISPLAY, FONT_TEXT, useToast } from "@/src/components/ui";
 import { OrderLines } from "@/src/components/order-lines";
@@ -13,9 +13,11 @@ import type { Order } from "@/src/types";
 
 const QUICK_MINUTES = [15, 20, 30, 40, 45, 60];
 
-export function sourceLabel(src: string) {
+export function sourceLabel(src: string, station?: number | null) {
+  if (src === "telephone") return `TÉLÉPHONE · POSTE ${station ?? 1}`;
   return src === "ios" ? "iPhone" : src === "android" ? "Android" : "Web";
 }
+const DRIVERS = ["Livreur 1", "Livreur 2", "Livreur 3"];
 
 /** Compact order card for the queue list */
 export function OrderCard({ order: o, selected, onPress }: { order: Order; selected?: boolean; onPress: () => void }) {
@@ -29,7 +31,7 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
         <Text style={styles.cardNum}>#{o.order_number}</Text>
         <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
           {o.age_required ? <Badge label={`${o.age_required}+`} tone="warning" testID={`staff-card-age-${o.id}`} /> : null}
-          <Badge label={sourceLabel(o.source)} tone="inverse" />
+          <Badge label={sourceLabel(o.source, o.station)} tone={o.source === "telephone" ? "warning" : "inverse"} />
           <Badge label={o.type === "pickup" ? t("pickup").toUpperCase() : t("delivery").toUpperCase()} tone={o.type === "pickup" ? "success" : "brand"} />
         </View>
       </View>
@@ -58,6 +60,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
   const toast = useToast();
   const action = useOrderAction();
   const print = usePrintTicket();
+  const assign = useAssignDriver();
   const [customTime, setCustomTime] = useState("");
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
@@ -119,7 +122,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
       <View style={styles.detailHead}>
         <View style={{ flex: 1 }}>
           <Text style={styles.detailNum} testID="staff-detail-number">#{o.order_number}</Text>
-          <Text style={styles.detailMeta}>{fmtTime(o.created_at)} · {sourceLabel(o.source)} · {o.type === "pickup" ? t("pickup") : t("delivery")}</Text>
+          <Text style={styles.detailMeta}>{fmtTime(o.created_at)} · {sourceLabel(o.source, o.station)} · {o.type === "pickup" ? t("pickup") : t("delivery")}{o.driver ? ` · ${o.driver}` : ""}</Text>
         </View>
         <Badge label={statusLabel(o.status, o.type, t)} tone={statusTone(o.status)} testID="staff-detail-status" />
         {onClose ? (
@@ -168,7 +171,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
           <Text style={styles.totalLabel}>{t("total")}{o.delivery_fee > 0 ? ` (${t("deliveryFee").toLowerCase()} ${chf(o.delivery_fee)})` : ""}</Text>
           <Text style={styles.totalValue} testID="staff-detail-total">{chf(o.total)}</Text>
         </View>
-        <Text style={styles.pay}>{o.payment_method === "pay_at_pickup" ? t("payAtPickup").toUpperCase() : t("payAtDelivery").toUpperCase()}</Text>
+        <Text style={styles.pay}>{o.payment_method === "cash" ? t("payCash").toUpperCase() : o.payment_method === "terminal" ? t("payTerminal").toUpperCase() : o.payment_method === "pay_at_pickup" ? t("payAtPickup").toUpperCase() : t("payAtDelivery").toUpperCase()}</Text>
       </View>
 
       {/* Actions */}
@@ -232,6 +235,16 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
             <TextInput testID="staff-delay-time-input" value={customTime} onChangeText={setCustomTime} placeholder="20:15" placeholderTextColor={colors.muted} style={styles.customInput} keyboardType="numbers-and-punctuation" />
             <Button title={t("customTime")} variant="secondary" disabled={!validTime} onPress={() => run("delay", { time: customTime.trim() }, "warning")} style={{ flex: 1 }} testID="staff-delay-custom-time" />
           </View>
+          {o.type === "delivery" ? (
+            <View style={{ gap: 8 }}>
+              <Text style={styles.actionLabel}>{t("assignDriver")}{o.driver ? ` · ${o.driver}` : ""}</Text>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {DRIVERS.map((d) => (
+                  <Button key={d} title={d} variant={o.driver === d ? "success" : "outline"} onPress={() => assign.mutateAsync({ id: o.id, driver: d }).catch((e) => toast.show(e.message, "error"))} style={{ flex: 1 }} testID={`staff-assign-${d.slice(-1)}`} />
+                ))}
+              </View>
+            </View>
+          ) : null}
           {nextSteps.map((s) => (
             <Button key={s.status} title={s.label} size="xl" icon={s.icon} variant={s.status === "completed" ? "primary" : "success"} loading={action.isPending} onPress={() => run("status", { status: s.status })} testID={`staff-status-${s.status}`} />
           ))}

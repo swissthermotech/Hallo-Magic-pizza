@@ -127,8 +127,15 @@ async def register(body: RegisterIn):
     phone = normalize_phone(body.phone)
     if len(phone) < 7:
         raise HTTPException(400, "Numéro de téléphone invalide")
-    if await db.users.find_one({"phone": phone}):
+    existing = await db.users.find_one({"phone": phone})
+    if existing and existing.get("password_hash"):
         raise HTTPException(409, "Un compte existe déjà avec ce numéro")
+    if existing:
+        # Customer created by staff from a phone order (no password yet) -> the caller claims the account
+        await db.users.update_one({"_id": existing["_id"]}, {"$set": {"password_hash": password_hash.hash(body.password), "first_name": body.first_name.strip(),
+                                                                       "last_name": body.last_name.strip() or existing.get("last_name", ""), "email": (body.email or "").strip().lower() or existing.get("email")}})
+        existing = await db.users.find_one({"_id": existing["_id"]})
+        return TokenOut(access_token=make_token(existing["_id"]), user=user_out(existing))
     doc = {"first_name": body.first_name.strip(), "last_name": body.last_name.strip(), "phone": phone,
            "email": (body.email or "").strip().lower() or None, "password_hash": password_hash.hash(body.password),
            "addresses": [], "created_at": datetime.now(timezone.utc)}
@@ -142,10 +149,10 @@ async def login(body: LoginIn):
     user = await db.users.find_one({"phone": normalize_phone(body.phone)})
     dummy = "$argon2id$v=19$m=65536,t=3,p=4$dummy$dummy"
     try:
-        valid = password_hash.verify(body.password, user["password_hash"] if user else dummy)
+        valid = password_hash.verify(body.password, user["password_hash"] if user and user.get("password_hash") else dummy)
     except Exception:
         valid = False
-    if not user or not valid:
+    if not user or not user.get("password_hash") or not valid:
         raise HTTPException(401, "Téléphone ou mot de passe incorrect")
     return TokenOut(access_token=make_token(user["_id"]), user=user_out(user))
 
@@ -198,3 +205,49 @@ async def save_address_for_user(user: dict, address: dict):
     addr = {"id": str(ObjectId()), "label": "", "street": address["street"], "number": address.get("number", ""), "npa": address["npa"],
             "city": address["city"], "instructions": address.get("instructions")}
     await db.users.update_one({"_id": user["_id"]}, {"$push": {"addresses": addr}})
+
+
+# ---------------------------------------------------------------------------
+# Staff-side customers (phone orders) – same collection as customer accounts, no password until the customer registers
+# ---------------------------------------------------------------------------
+customers_router = APIRouter(prefix="/customers")
+
+
+class CustomerIn(BaseModel):
+    first_name: str = Field(min_length=1)
+    last_name: str = ""
+    phone: str = Field(min_length=7)
+    email: Optional[str] = None
+    address: Optional[SavedAddress] = None
+
+
+@customers_router.post("", response_model=UserOut, status_code=201)
+async def create_customer(body: CustomerIn):
+    phone = normalize_phone(body.phone)
+    if len(phone) < 7:
+        raise HTTPException(400, "Numéro de téléphone invalide")
+    if await db.users.find_one({"phone": phone}):
+        raise HTTPException(409, "Un client existe déjà avec ce numéro")
+    addresses = []
+    if body.address:
+        a = body.address.model_dump()
+        a["id"] = str(ObjectId())
+        addresses.append(a)
+    doc = {"first_name": body.first_name.strip(), "last_name": body.last_name.strip(), "phone": phone, "email": (body.email or "").strip().lower() or None,
+           "password_hash": None, "addresses": addresses, "created_at": datetime.now(timezone.utc), "created_by": "staff"}
+    res = await db.users.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return user_out(doc)
+
+
+@customers_router.post("/{customer_id}/addresses", response_model=UserOut)
+async def staff_add_address(customer_id: str, body: SavedAddress):
+    try:
+        cid = ObjectId(customer_id)
+    except Exception:
+        raise HTTPException(404, "Customer not found")
+    user = await db.users.find_one({"_id": cid})
+    if not user:
+        raise HTTPException(404, "Customer not found")
+    await save_address_for_user(user, body.model_dump())
+    return user_out(await db.users.find_one({"_id": cid}))

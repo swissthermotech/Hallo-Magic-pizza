@@ -238,6 +238,57 @@ export function useCustomerSearch(phone: string) {
   });
 }
 
+// ---- Phone orders (staff iPads) ----
+export interface PhoneOrderPayload extends PlaceOrderPayload {
+  station: number;
+  payment_method: string;
+  customer_id?: string | null;
+}
+export function usePlacePhoneOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (p: PhoneOrderPayload) =>
+      api.post<Order>("/phone-orders", {
+        type: p.type,
+        source: "telephone",
+        station: p.station,
+        payment_method: p.payment_method,
+        customer_id: p.customer_id ?? null,
+        items: p.items.map((i) => ({
+          product_id: i.product_id,
+          quantity: i.quantity,
+          size_key: i.size?.key ?? null,
+          option_keys: i.options.map((o) => o.key),
+          removed_ingredient_ids: i.removed_ingredients.map((r) => r.id),
+          extras: i.extras.map((e) => ({ extra_id: e.extra_id, quantity: e.quantity })),
+          note: i.note || null,
+        })),
+        customer: p.customer,
+        address: p.address,
+        requested_time: p.requested_time,
+        general_note: p.general_note,
+        age_confirmed: true,
+        save_address: !!p.save_address,
+        language: p.language,
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+  });
+}
+export const customersApi = {
+  create: (body: { first_name: string; last_name: string; phone: string; email?: string; address?: Omit<SavedAddress, "id"> | null }) => api.post<User>("/customers", body),
+  addAddress: (id: string, body: Omit<SavedAddress, "id">) => api.post<User>(`/customers/${id}/addresses`, body),
+};
+export function useAssignDriver() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, driver }: { id: string; driver: string }) => api.post<Order>(`/orders/${id}/assign`, { driver }),
+    onSuccess: (o) => {
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["order", o.id] });
+    },
+  });
+}
+
 // ---- Product photo upload (admin) ----
 export async function uploadProductPhoto(uri: string, name = "photo.jpg", type = "image/jpeg"): Promise<{ url: string; path: string; size: number }> {
   const form = new FormData();

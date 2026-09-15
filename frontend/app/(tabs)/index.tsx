@@ -1,7 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, SectionList, Text, View } from "react-native";
 import { Image } from "expo-image";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@react-native-vector-icons/feather";
@@ -9,13 +8,11 @@ import * as Haptics from "expo-haptics";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useMenu } from "@/src/api";
+import { imgUri, useMenu } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { ProductCard } from "@/src/components/product-card";
 import { Button, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
 import type { OrderType, Product } from "@/src/types";
-
-const HERO = "https://images.unsplash.com/photo-1579751626657-72bc17010498?w=1400&q=85";
 
 export function LanguageToggle({ inverse }: { inverse?: boolean }) {
   const { lang, setLang } = useI18n();
@@ -106,6 +103,8 @@ export default function MenuScreen() {
   };
 
   const settings = data?.settings;
+  // Real photography: the Quattro Formaggi main photo (uploaded in admin) is the hero image
+  const heroProduct = data?.products.find((p) => p.name.fr === "Quattro Formaggi") ?? data?.products[0];
 
   return (
     <View style={styles.screen}>
@@ -143,24 +142,26 @@ export default function MenuScreen() {
           ListHeaderComponent={
             cat === "all" ? (
               <Animated.View entering={FadeInDown.duration(500)}>
-                <View style={styles.hero}>
-                  <Image source={{ uri: HERO }} style={styles.heroImg} contentFit="cover" transition={400} />
-                  <LinearGradient colors={[colors.scrimTransparent, colors.scrim]} start={{ x: 0.5, y: 0.15 }} end={{ x: 0.5, y: 1 }} style={styles.heroScrim} />
+                {settings?.temporarily_closed ? (
+                  <View style={styles.closedBanner} testID="closed-banner">
+                    <Feather name="alert-circle" size={16} color={colors.onError} />
+                    <Text style={styles.closedText}>{t("closedNow")}</Text>
+                  </View>
+                ) : null}
+                <View style={styles.hero} testID="home-hero">
                   <View style={styles.heroText}>
-                    <Text style={styles.heroKicker}>PIZZERIA · FRIBOURG</Text>
-                    <Text style={styles.heroTitle}>{t("heroTitle")}</Text>
+                    <Text style={styles.heroKicker}>{t("heroKicker")}</Text>
+                    <Text style={styles.heroTitle}>Hallo Magic Pizza</Text>
                     <Text style={styles.heroSub}>{t("heroSub")}</Text>
                     <Pressable testID="hero-order-now" onPress={orderNow} style={({ pressed }) => [styles.heroCta, pressed && { transform: [{ scale: 0.98 }], opacity: 0.9 }]}>
-                      <Text style={styles.heroCtaText}>{t("orderNowCta")}</Text>
+                      <Text style={styles.heroCtaText} numberOfLines={1}>{t("orderNowCta")}</Text>
                       <Feather name="arrow-right" size={18} color={colors.onBrandPrimary} />
                     </Pressable>
                   </View>
-                  {settings?.temporarily_closed ? (
-                    <View style={styles.closedBanner} testID="closed-banner">
-                      <Feather name="alert-circle" size={16} color={colors.onError} />
-                      <Text style={styles.closedText}>{t("closedNow")}</Text>
-                    </View>
-                  ) : null}
+                  <Pressable testID="hero-photo" onPress={() => heroProduct && router.push({ pathname: "/product/[id]", params: { id: heroProduct.id } })} style={styles.heroPhotoWrap}>
+                    <View style={styles.heroPhotoRing} />
+                    <Image source={{ uri: imgUri(heroProduct?.image_url) }} style={styles.heroPhoto} contentFit="cover" transition={400} />
+                  </Pressable>
                 </View>
                 <Text style={styles.howTo}>{t("howToGet")}</Text>
                 <OrderTypeSelector />
@@ -216,18 +217,19 @@ const useStyles = makeStyles((colors) => ({
   chipTextOn: { color: colors.onBrandPrimary },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, padding: 24 },
   errorText: { fontFamily: FONT_TEXT, color: colors.muted, fontSize: 16 },
-  hero: { height: 420, borderRadius: 28, overflow: "hidden", marginTop: 16, backgroundColor: colors.surfaceTertiary, shadowColor: colors.surfaceInverse, shadowOpacity: 0.18, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
-  heroImg: { width: "100%", height: "100%" },
-  heroScrim: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0 },
-  heroText: { position: "absolute", left: 22, right: 22, bottom: 22, gap: 10 },
-  heroKicker: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "800", letterSpacing: 2.5, color: colors.onSurfaceInverse, opacity: 0.85 },
-  heroTitle: { fontFamily: FONT_DISPLAY, fontSize: 34, color: colors.onSurfaceInverse, lineHeight: 40 },
-  heroSub: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.onSurfaceInverse, opacity: 0.9, lineHeight: 20 },
-  heroCta: { marginTop: 6, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 10, backgroundColor: colors.brandPrimary, height: 54, paddingHorizontal: 24, borderRadius: 999 },
-  heroCtaText: { fontFamily: FONT_TEXT, fontSize: 16, fontWeight: "800", color: colors.onBrandPrimary, letterSpacing: 0.3 },
-  closedBanner: { position: "absolute", top: 14, left: 14, right: 14, backgroundColor: colors.error, borderRadius: 12, padding: 10, flexDirection: "row", gap: 8, alignItems: "center" },
+  hero: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 14, padding: 18, borderRadius: 28, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, shadowColor: colors.surfaceInverse, shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
+  heroText: { flex: 1, gap: 8 },
+  heroKicker: { fontFamily: FONT_TEXT, fontSize: 10.5, fontWeight: "800", letterSpacing: 2, color: colors.brandPrimary },
+  heroTitle: { fontFamily: FONT_DISPLAY, fontSize: 27, color: colors.onSurface, lineHeight: 31 },
+  heroSub: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.onSurfaceSecondary, lineHeight: 19 },
+  heroCta: { marginTop: 6, alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.brandPrimary, height: 48, paddingHorizontal: 18, borderRadius: 999 },
+  heroCtaText: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.onBrandPrimary, letterSpacing: 0.3 },
+  heroPhotoWrap: { width: 112, height: 112, alignItems: "center", justifyContent: "center" },
+  heroPhotoRing: { position: "absolute", width: 112, height: 112, borderRadius: 56, backgroundColor: colors.brandSoft },
+  heroPhoto: { width: 98, height: 98, borderRadius: 49, backgroundColor: colors.surfaceTertiary },
+  closedBanner: { marginTop: 14, backgroundColor: colors.error, borderRadius: 12, padding: 10, flexDirection: "row", gap: 8, alignItems: "center" },
   closedText: { fontFamily: FONT_TEXT, color: colors.onError, fontWeight: "700" },
-  howTo: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.muted, marginTop: 24, marginBottom: 10, letterSpacing: 0.3, textTransform: "uppercase" },
+  howTo: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "700", color: colors.muted, marginTop: 18, marginBottom: 8, letterSpacing: 0.3, textTransform: "uppercase" },
   typeRow: { flexDirection: "row", gap: 10 },
   typeBtn: { flex: 1, height: 72, borderRadius: 18, backgroundColor: colors.surfaceSecondary, borderWidth: 1.5, borderColor: colors.border, flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12 },
   typeBtnOn: { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse },

@@ -58,6 +58,7 @@ export default function RootLayout() {
                       <Stack.Screen name="account/index" />
                       <Stack.Screen name="account/address" options={{ presentation: "modal" }} />
                       <Stack.Screen name="staff" />
+                      <Stack.Screen name="phone-orders/index" />
                     </Stack>
                   </ToastProvider>
                   </StaffProvider>

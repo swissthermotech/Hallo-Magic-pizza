@@ -81,6 +81,7 @@ export default function StaffDashboard() {
           <Feather name={soundOn ? "volume-2" : "volume-x"} size={20} color={soundOn ? colors.onBrandPrimary : colors.onSurface} />
         </Pressable>
         <Pressable testID="staff-go-kitchen" onPress={() => router.push("/staff/kitchen")} style={styles.iconBtn}><Feather name="coffee" size={20} color={colors.onSurface} /></Pressable>
+        <Pressable testID="staff-go-phone-orders" onPress={() => router.push("/phone-orders")} style={styles.iconBtn}><Feather name="phone" size={20} color={colors.onSurface} /></Pressable>
         <Pressable testID="staff-go-customers" onPress={() => router.push("/staff/customers")} style={styles.iconBtn}><Feather name="users" size={20} color={colors.onSurface} /></Pressable>
         <Pressable testID="staff-go-admin" onPress={() => router.push("/staff/admin")} style={styles.iconBtn}><Feather name="settings" size={20} color={colors.onSurface} /></Pressable>
         <Pressable testID="staff-lock" onPress={() => { lock(); router.replace("/(tabs)/more"); }} style={styles.iconBtn}><Feather name="lock" size={18} color={colors.onSurface} /></Pressable>

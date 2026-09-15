@@ -218,6 +218,8 @@ export interface Order {
   age_confirmed: boolean;
   age_required?: 16 | 18 | null;
   user_id?: string | null;
+  station?: number | null;
+  driver?: string | null;
   subtotal: number;
   extras_total: number;
   delivery_fee: number;
