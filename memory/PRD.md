@@ -67,6 +67,12 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Concurrency: phone-order `client_request_id` idempotency (partial unique index), stale status updates → 409, double accept → 400, closed order → 409, double print → 409.
 - Tests: `/app/backend/tests/test_staff_driver_iter7.py` (29), iter6 (17), VAT (15) all passing; frontend E2E iteration 7 passed.
 
+## Implemented (2026-06) – security hardening of legacy endpoints
+- Every staff/admin/driver endpoint now requires a server-side staff JWT + role: manager/kitchen → staff order list (`GET /orders` without `ids`), accept/reject/delay/status/assign/print/receipt/print-jobs; manager/kitchen/phone → ticket; manager/phone → customers search/create/addresses, phone-orders; manager → product/extra/category/settings writes, photo upload, reports, PIN management; drivers → `/driver/*` (own orders only). Customer-facing stays public: `GET /menu`, `/settings`, `POST /orders`, `GET /orders/{id}`, `GET /orders?ids=` (device-stored ids).
+- `EXPO_PUBLIC_STAFF_PIN` removed from frontend .env; no PINs / JWT secret / PrintNode keys in frontend or repo (test asserts it).
+- Regression suite: `tests/test_security_iter8.py` (401 unauth, 403 wrong role, allowed roles, customer token ≠ staff token, driver isolation, public endpoints, no secrets) + `tests/conftest.py` injects a manager token into the older functional suites. 110 backend tests passing.
+- ⚠ Note: `PUT /settings` replaces the whole settings document – always send the full object (admin screen does).
+
 ## Backlog
 - P0: PrintNode live credentials + real ESC/POS ticket test on Epson TM-T70II; staff PIN protection.
 - P1: real push notifications (Emergent push after build), favourites + one-tap reorder for account holders, dedicated driver view (age-check warning already in staff detail), web layout polish for desktop widths, category manager UI, extras per-size pricing.

@@ -221,8 +221,13 @@ class CustomerIn(BaseModel):
     address: Optional[SavedAddress] = None
 
 
+def _phone_roles():
+    import staff_auth
+    return staff_auth.require_roles("manager", "phone")
+
+
 @customers_router.post("", response_model=UserOut, status_code=201)
-async def create_customer(body: CustomerIn):
+async def create_customer(body: CustomerIn, _: dict = Depends(_phone_roles())):
     phone = normalize_phone(body.phone)
     if len(phone) < 7:
         raise HTTPException(400, "Numéro de téléphone invalide")
@@ -241,7 +246,7 @@ async def create_customer(body: CustomerIn):
 
 
 @customers_router.post("/{customer_id}/addresses", response_model=UserOut)
-async def staff_add_address(customer_id: str, body: SavedAddress):
+async def staff_add_address(customer_id: str, body: SavedAddress, _: dict = Depends(_phone_roles())):
     try:
         cid = ObjectId(customer_id)
     except Exception:

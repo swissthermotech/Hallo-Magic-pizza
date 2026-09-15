@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 import requests
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from PIL import Image, ImageOps
@@ -88,8 +88,13 @@ def optimise(raw: bytes) -> bytes:
     return out.getvalue()
 
 
+def _manager():
+    import staff_auth
+    return staff_auth.require_roles("manager")
+
+
 @router.post("/uploads/product-photo")
-async def upload_product_photo(file: UploadFile = File(...)):
+async def upload_product_photo(file: UploadFile = File(...), _: dict = Depends(_manager())):
     """Admin upload. Returns the public API url to store on the product (image_url / images[])."""
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_BYTES:

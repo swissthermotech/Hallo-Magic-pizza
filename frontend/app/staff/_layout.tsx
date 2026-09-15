@@ -20,7 +20,7 @@ export default function StaffLayout() {
   if (unlocked && isLogin) return <Redirect href={homeFor(role!)} />;
   // Role boundaries: drivers only see /driver, phone role only /phone-orders, admin & closing are manager-only
   if (unlocked && role && role.startsWith("driver")) return <Redirect href="/driver" />;
-  if (unlocked && role === "phone") return <Redirect href="/phone-orders" />;
+  if (unlocked && role === "phone" && !pathname.startsWith("/staff/ticket")) return <Redirect href="/phone-orders" />;
   if (unlocked && role !== "manager" && (pathname.startsWith("/staff/admin") || pathname.startsWith("/staff/closing"))) return <Redirect href="/staff" />;
 
   return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themes.light.surface } }} />;

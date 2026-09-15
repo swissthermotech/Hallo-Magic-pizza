@@ -16,6 +16,13 @@ from database import client, db
 import auth as auth_mod
 import photos as photos_mod
 import staff_auth as staff_mod
+from fastapi.security import HTTPAuthorizationCredentials
+
+# Role guards (server-side JWT). Customer-facing endpoints (menu, settings, POST /orders, GET /orders/{id}, GET /orders?ids=) stay public.
+MANAGER = staff_mod.require_roles("manager")
+STAFF = staff_mod.require_roles("manager", "kitchen")
+PHONE = staff_mod.require_roles("manager", "phone")
+TICKET = staff_mod.require_roles("manager", "kitchen", "phone")
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -540,13 +547,13 @@ async def list_categories():
 
 
 @api.post("/categories", response_model=Category)
-async def create_category(body: CategoryIn):
+async def create_category(body: CategoryIn, _: dict = Depends(MANAGER)):
     res = await db.categories.insert_one(Category(**body.model_dump()).to_mongo())
     return Category.from_mongo(await db.categories.find_one({"_id": res.inserted_id}))
 
 
 @api.put("/categories/{cat_id}", response_model=Category)
-async def update_category(cat_id: str, body: CategoryIn):
+async def update_category(cat_id: str, body: CategoryIn, _: dict = Depends(MANAGER)):
     doc = await db.categories.find_one_and_update({"_id": oid(cat_id)}, {"$set": body.model_dump()}, return_document=ReturnDocument.AFTER)
     if not doc:
         raise HTTPException(404, "Category not found")
@@ -570,13 +577,13 @@ async def get_product(product_id: str):
 
 
 @api.post("/products", response_model=Product)
-async def create_product(body: ProductIn):
+async def create_product(body: ProductIn, _: dict = Depends(MANAGER)):
     res = await db.products.insert_one(Product(**body.model_dump()).to_mongo())
     return Product.from_mongo(await db.products.find_one({"_id": res.inserted_id}))
 
 
 @api.put("/products/{product_id}", response_model=Product)
-async def update_product(product_id: str, body: ProductIn):
+async def update_product(product_id: str, body: ProductIn, _: dict = Depends(MANAGER)):
     doc = await db.products.find_one_and_update({"_id": oid(product_id)}, {"$set": body.model_dump()}, return_document=ReturnDocument.AFTER)
     if not doc:
         raise HTTPException(404, "Product not found")
@@ -584,7 +591,7 @@ async def update_product(product_id: str, body: ProductIn):
 
 
 @api.patch("/products/{product_id}", response_model=Product)
-async def patch_product(product_id: str, body: ProductPatch):
+async def patch_product(product_id: str, body: ProductPatch, _: dict = Depends(MANAGER)):
     update = body.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(400, "Nothing to update")
@@ -595,7 +602,7 @@ async def patch_product(product_id: str, body: ProductPatch):
 
 
 @api.delete("/products/{product_id}")
-async def delete_product(product_id: str):
+async def delete_product(product_id: str, _: dict = Depends(MANAGER)):
     res = await db.products.update_one({"_id": oid(product_id)}, {"$set": {"deleted_at": now_utc(), "available": False}})
     if res.matched_count == 0:
         raise HTTPException(404, "Product not found")
@@ -608,7 +615,7 @@ async def list_extras():
 
 
 @api.post("/extras", response_model=Extra)
-async def create_extra(body: ExtraIn):
+async def create_extra(body: ExtraIn, _: dict = Depends(MANAGER)):
     if await db.extras.find_one({"key": body.key}):
         raise HTTPException(400, "Extra key already exists")
     res = await db.extras.insert_one(Extra(**body.model_dump()).to_mongo())
@@ -616,7 +623,7 @@ async def create_extra(body: ExtraIn):
 
 
 @api.put("/extras/{extra_id}", response_model=Extra)
-async def update_extra(extra_id: str, body: ExtraIn):
+async def update_extra(extra_id: str, body: ExtraIn, _: dict = Depends(MANAGER)):
     doc = await db.extras.find_one_and_update({"_id": oid(extra_id)}, {"$set": body.model_dump()}, return_document=ReturnDocument.AFTER)
     if not doc:
         raise HTTPException(404, "Extra not found")
@@ -624,7 +631,7 @@ async def update_extra(extra_id: str, body: ExtraIn):
 
 
 @api.delete("/extras/{extra_id}")
-async def delete_extra(extra_id: str):
+async def delete_extra(extra_id: str, _: dict = Depends(MANAGER)):
     res = await db.extras.delete_one({"_id": oid(extra_id)})
     if res.deleted_count == 0:
         raise HTTPException(404, "Extra not found")
@@ -644,7 +651,7 @@ async def get_settings():
 
 
 @api.put("/settings", response_model=Settings)
-async def update_settings(body: Settings):
+async def update_settings(body: Settings, _: dict = Depends(MANAGER)):
     await db.settings.update_one({"_id": "main"}, {"$set": body.model_dump()}, upsert=True)
     return body
 
@@ -857,7 +864,7 @@ async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.op
 
 
 @api.post("/phone-orders", response_model=Order)
-async def create_phone_order(body: PhoneOrderIn):
+async def create_phone_order(body: PhoneOrderIn, _: dict = Depends(PHONE)):
     """Staff-entered phone order: same catalog, prices, VAT snapshot, ticket and receipt as any other order.
     Created directly as ACCEPTED (staff confirmed it on the phone) and printed once immediately."""
     if body.station not in (1, 2):
@@ -903,7 +910,7 @@ class AssignIn(BaseModel):
 
 
 @api.post("/orders/{order_id}/assign", response_model=Order)
-async def assign_driver(order_id: str, body: AssignIn):
+async def assign_driver(order_id: str, body: AssignIn, _: dict = Depends(STAFF)):
     doc = await load_order(order_id)
     if doc["type"] != "delivery":
         raise HTTPException(400, "Only delivery orders can be assigned")
@@ -1075,7 +1082,7 @@ async def my_orders(user: dict = Depends(auth_mod.current_user), limit: int = 50
 
 
 @api.get("/customers/search")
-async def search_customers(phone: str = Query(min_length=3), limit: int = 20):
+async def search_customers(phone: str = Query(min_length=3), limit: int = 20, _: dict = Depends(PHONE)):
     """Staff / phone-order lookup: accounts + past orders matching a phone number (accounts and guests)."""
     digits = auth_mod.normalize_phone(phone)
     if len(digits) < 3:
@@ -1088,11 +1095,16 @@ async def search_customers(phone: str = Query(min_length=3), limit: int = 20):
 
 
 @api.get("/orders", response_model=List[Order])
-async def list_orders(active: bool = True, ids: Optional[str] = None, limit: int = 100):
+async def list_orders(active: bool = True, ids: Optional[str] = None, limit: int = 100, credentials: HTTPAuthorizationCredentials = Depends(auth_mod.bearer)):
+    """`ids=` -> the customer's own orders (device-stored ids, no auth). Without ids -> full staff list (manager/kitchen only)."""
     q: Dict[str, Any] = {}
     if ids:
         q["_id"] = {"$in": [oid(i) for i in ids.split(",") if i]}
-    elif active:
+    else:
+        user = await staff_mod.staff_user(credentials)
+        if user["role"] not in ("manager", "kitchen"):
+            raise HTTPException(403, "Accès refusé pour ce rôle")
+    if not ids and active:
         q["$or"] = [
             {"status": {"$nin": list(TERMINAL)}},
             {"status": {"$in": list(TERMINAL)}, "created_at": {"$gte": now_utc() - timedelta(hours=3)}},
@@ -1228,7 +1240,7 @@ async def push_status(doc: dict, status: str, notif: Optional[dict], extra_set: 
 
 
 @api.post("/orders/{order_id}/accept", response_model=Order)
-async def accept_order(order_id: str, body: AcceptIn):
+async def accept_order(order_id: str, body: AcceptIn, _: dict = Depends(STAFF)):
     doc = await load_order(order_id)
     if doc["status"] != "pending":
         raise HTTPException(400, "Order is not pending")
@@ -1257,7 +1269,7 @@ async def accept_order(order_id: str, body: AcceptIn):
 
 
 @api.post("/orders/{order_id}/reject", response_model=Order)
-async def reject_order(order_id: str, body: RejectIn):
+async def reject_order(order_id: str, body: RejectIn, _: dict = Depends(STAFF)):
     doc = await load_order(order_id)
     if doc["status"] in TERMINAL:
         raise HTTPException(400, "Order already closed")
@@ -1266,7 +1278,7 @@ async def reject_order(order_id: str, body: RejectIn):
 
 
 @api.post("/orders/{order_id}/delay", response_model=Order)
-async def delay_order(order_id: str, body: DelayIn):
+async def delay_order(order_id: str, body: DelayIn, _: dict = Depends(STAFF)):
     """Add +N minutes or set a new exact time. Customer is notified immediately."""
     doc = await load_order(order_id)
     if doc["status"] in TERMINAL or doc["status"] == "pending":
@@ -1300,7 +1312,7 @@ STATUS_EVENT = {
 
 
 @api.post("/orders/{order_id}/status", response_model=Order)
-async def set_status(order_id: str, body: StatusIn):
+async def set_status(order_id: str, body: StatusIn, _: dict = Depends(STAFF)):
     doc = await load_order(order_id)
     flow = PICKUP_FLOW if doc["type"] == "pickup" else DELIVERY_FLOW
     if body.status not in flow and body.status != "cancelled":
@@ -1388,7 +1400,7 @@ def build_ticket(o: dict, settings: Settings) -> str:
 
 
 @api.get("/orders/{order_id}/ticket")
-async def get_ticket(order_id: str):
+async def get_ticket(order_id: str, _: dict = Depends(TICKET)):
     doc = await load_order(order_id)
     settings = await get_settings()
     return {"order_id": order_id, "order_number": doc["order_number"], "text": build_ticket(doc, settings),
@@ -1403,14 +1415,14 @@ class PrintIn(BaseModel):
 
 
 @api.post("/orders/{order_id}/print")
-async def print_ticket(order_id: str, body: PrintIn = PrintIn()):
+async def print_ticket(order_id: str, body: PrintIn = PrintIn(), _: dict = Depends(STAFF)):
     """Print (first time) or re-print (force=true) the 80mm kitchen ticket."""
     doc = await load_order(order_id)
     return await do_print(doc, body.force)
 
 
 @api.get("/print-jobs")
-async def list_print_jobs(limit: int = 50):
+async def list_print_jobs(limit: int = 50, _: dict = Depends(STAFF)):
     docs = await db.print_jobs.find({}).sort("created_at", -1).to_list(limit)
     for d in docs:
         d["id"] = str(d.pop("_id"))
@@ -1477,7 +1489,7 @@ def build_receipt(o: dict, s: Settings) -> str:
 
 
 @api.get("/orders/{order_id}/receipt")
-async def get_receipt(order_id: str):
+async def get_receipt(order_id: str, _: dict = Depends(STAFF)):
     doc = await load_order(order_id)
     s = await get_settings()
     return {"order_id": order_id, "order_number": doc["order_number"], "text": build_receipt(doc, s),
@@ -1487,7 +1499,7 @@ async def get_receipt(order_id: str):
 
 
 @api.post("/orders/{order_id}/receipt/print")
-async def print_receipt(order_id: str, body: PrintIn = PrintIn()):
+async def print_receipt(order_id: str, body: PrintIn = PrintIn(), _: dict = Depends(STAFF)):
     """Print / re-print the customer receipt (same simulated PrintNode pipeline as the kitchen ticket)."""
     doc = await load_order(order_id)
     if doc.get("receipt_printed") and not body.force:

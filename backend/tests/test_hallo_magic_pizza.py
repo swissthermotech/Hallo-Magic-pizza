@@ -131,7 +131,7 @@ class TestOrderCreate:
         }
         r = s.post(f"{API}/orders", json=payload)
         assert r.status_code == 400
-        assert "Age" in r.text or "age" in r.text.lower()
+        assert "âge" in r.text.lower() or "age" in r.text.lower()
 
 
 # ---------------- Accept / Delay / Status / Print ----------------
@@ -223,8 +223,8 @@ class TestOrderLifecycle:
         assert r.status_code == 200
         t = r.json()["text"]
         assert "HALLO MAGIC PIZZA" in t
-        assert "COMMANDE #" in t
-        assert "40CM" in t.upper()
+        assert "# " in t  # spaced order number on the operational ticket
+        assert "40 CM" in t.upper()
         assert "- SANS" in t
         assert "+ " in t
         assert "NOTE:" in t

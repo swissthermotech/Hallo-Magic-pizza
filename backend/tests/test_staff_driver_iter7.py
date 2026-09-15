@@ -366,7 +366,7 @@ class TestFlowD_NewCustomerStation2:
         # POST closing with actual_cash = expected - 10 -> diff -10
         from datetime import date
         r = requests.post(f"{API}/reports/closing", headers=_hdr(STATE["tok_manager"]),
-                          json={"date": date.today().isoformat(),
+                          json={"date": drv["date"],  # report day in Europe/Zurich
                                 "driver": "Livreur 3",
                                 "actual_cash": round(expected - 10, 2)})
         assert r.status_code == 200, r.text
