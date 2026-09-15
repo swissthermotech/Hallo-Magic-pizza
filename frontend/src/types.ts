@@ -40,6 +40,7 @@ export interface Extra {
   price: number;
   available: boolean;
   max_quantity: number;
+  vat_rate?: number | null;
 }
 
 export interface WineInfo {
@@ -63,8 +64,38 @@ export interface Product {
   allergens: I18nText;
   available: boolean;
   is_alcohol: boolean;
+  alcohol_type?: AlcoholType | null;
+  images: string[];
   wine?: WineInfo | null;
   sort: number;
+  vat_rate?: number | null;
+}
+
+export type AlcoholType = "fermented" | "spirits";
+/** 16+ for fermented drinks (beer, wine, prosecco), 18+ for spirits; a mixed selection requires 18+. */
+export function requiredAge(items: { is_alcohol: boolean; alcohol_type?: AlcoholType | null }[]): 16 | 18 | null {
+  const ages = items.filter((i) => i.is_alcohol).map((i) => (i.alcohol_type === "spirits" ? 18 : 16));
+  return ages.length ? (Math.max(...ages) as 16 | 18) : null;
+}
+
+export interface SavedAddress {
+  id: string;
+  label: string;
+  street: string;
+  number: string;
+  npa: string;
+  city: string;
+  instructions?: string | null;
+}
+
+export interface User {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email?: string | null;
+  addresses: SavedAddress[];
+  created_at: string;
 }
 
 export interface DeliveryZone {
@@ -75,6 +106,14 @@ export interface DeliveryZone {
 
 export interface Settings {
   restaurant_name: string;
+  business_name: string;
+  street: string;
+  postal_code: string;
+  city: string;
+  vat_number: string;
+  vat_rate_standard: number;
+  vat_rate_alcohol: number;
+  delivery_fee_vat_rate: number;
   phone: string;
   address: string;
   opening_hours: Record<string, string>;
@@ -156,6 +195,13 @@ export interface Notification {
   created_at: string;
 }
 
+export interface VatGroup {
+  rate: number;
+  gross: number;
+  net: number;
+  vat: number;
+}
+
 export interface Order {
   id: string;
   order_number: number;
@@ -169,10 +215,25 @@ export interface Order {
   general_note?: string | null;
   payment_method: string;
   language: string;
+  age_confirmed: boolean;
+  age_required?: 16 | 18 | null;
+  user_id?: string | null;
   subtotal: number;
   extras_total: number;
   delivery_fee: number;
   total: number;
+  subtotal_gross: number;
+  delivery_fee_gross: number;
+  delivery_fee_vat_rate: number;
+  discount_gross: number;
+  total_gross: number;
+  vat_breakdown: VatGroup[];
+  total_vat: number;
+  total_net: number;
+  paid: boolean;
+  receipt_printed: boolean;
+  receipt_printed_at?: string | null;
+  receipt_print_attempts: number;
   created_at: string;
   accepted_at?: string | null;
   estimated_minutes?: number | null;
@@ -210,4 +271,5 @@ export interface CartItem {
   extras: CartExtra[];
   note: string;
   is_alcohol: boolean;
+  alcohol_type?: AlcoholType | null;
 }

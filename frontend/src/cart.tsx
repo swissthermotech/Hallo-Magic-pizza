@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { storage } from "@/src/utils/storage";
-import type { CartItem, OrderType } from "./types";
+import { requiredAge, type CartItem, type OrderType } from "./types";
 
 interface CartCtx {
   items: CartItem[];
@@ -14,6 +14,7 @@ interface CartCtx {
   subtotal: number;
   extrasTotal: number;
   hasAlcohol: boolean;
+  requiredAge: 16 | 18 | null;
   myOrderIds: string[];
   addMyOrder: (id: string) => void;
   orderType: OrderType;
@@ -79,6 +80,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       subtotal,
       extrasTotal,
       hasAlcohol: items.some((i) => i.is_alcohol),
+      requiredAge: requiredAge(items),
       myOrderIds,
       addMyOrder,
       orderType,

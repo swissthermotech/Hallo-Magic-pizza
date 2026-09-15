@@ -7,7 +7,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useMenu } from "@/src/api";
+import { imgUri, useMenu } from "@/src/api";
 import { lineTotal, useCart } from "@/src/cart";
 import { chf } from "@/src/format";
 import { Button, Empty, Field, FONT_DISPLAY, FONT_TEXT, Stepper } from "@/src/components/ui";
@@ -37,7 +37,7 @@ export default function CartScreen() {
           <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 200 }} bottomOffset={220} showsVerticalScrollIndicator={false}>
             {cart.items.map((it) => (
               <View key={it.line_id} style={styles.item} testID={`cart-item-${it.line_id}`}>
-                <Image source={{ uri: it.image_url || undefined }} style={styles.img} contentFit="cover" />
+                <Image source={{ uri: imgUri(it.image_url) }} style={styles.img} contentFit="cover" />
                 <View style={{ flex: 1 }}>
                   <View style={styles.itemHead}>
                     <Text style={styles.itemName} numberOfLines={1}>{tx(it.name)}{it.size ? ` · ${it.size.label}` : ""}</Text>

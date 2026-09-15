@@ -1,7 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Query, Request
+from fastapi import FastAPI, APIRouter, HTTPException, Query, Request, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 from pydantic import BaseModel, Field, BeforeValidator, ConfigDict, AliasChoices
 from typing import List, Optional, Dict, Any, Annotated, Literal
@@ -13,13 +12,12 @@ import logging
 from pathlib import Path
 
 from seed_data import CATEGORIES, EXTRAS, PRODUCTS, DEFAULT_SETTINGS
+from database import client, db
+import auth as auth_mod
+import photos as photos_mod
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
-
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -99,6 +97,7 @@ class Extra(BaseDocument):
     price: float
     available: bool = True
     max_quantity: int = 1
+    vat_rate: Optional[float] = None  # % – None -> settings standard rate
 
 
 class WineInfo(BaseModel):
@@ -138,8 +137,11 @@ class Product(BaseDocument):
     allergens: I18n = I18n()
     available: bool = True
     is_alcohol: bool = False
+    alcohol_type: Optional[str] = None  # "fermented" (beer, wine, prosecco -> 16+) | "spirits" (distilled -> 18+)
+    images: List[str] = []  # additional photos (API urls); image_url is the main photo
     wine: Optional[WineInfo] = None
     sort: int = 0
+    vat_rate: Optional[float] = None  # % – None -> derived from settings (alcohol vs standard)
     deleted_at: Optional[datetime] = None
 
 
@@ -157,11 +159,15 @@ class ProductIn(BaseModel):
     allergens: I18n = I18n()
     available: bool = True
     is_alcohol: bool = False
+    alcohol_type: Optional[str] = None
+    images: List[str] = []
     wine: Optional[WineInfo] = None
     sort: int = 0
+    vat_rate: Optional[float] = None
 
 
 class ProductPatch(BaseModel):
+    vat_rate: Optional[float] = None
     category_id: Optional[str] = None
     name: Optional[I18n] = None
     description: Optional[I18n] = None
@@ -175,6 +181,8 @@ class ProductPatch(BaseModel):
     allergens: Optional[I18n] = None
     available: Optional[bool] = None
     is_alcohol: Optional[bool] = None
+    alcohol_type: Optional[str] = None
+    images: Optional[List[str]] = None
     wine: Optional[WineInfo] = None
     sort: Optional[int] = None
 
@@ -185,6 +193,7 @@ class ExtraIn(BaseModel):
     price: float
     available: bool = True
     max_quantity: int = 1
+    vat_rate: Optional[float] = None
 
 
 class CategoryIn(BaseModel):
@@ -204,6 +213,15 @@ class DeliveryZone(BaseModel):
 
 class Settings(BaseModel):
     restaurant_name: str = "Hallo Magic Pizza"
+    # Fiscal / business identity (editable in admin)
+    business_name: str = "Hallo Magic Pizza"
+    street: str = "Route de Chésalles 19"
+    postal_code: str = "1723"
+    city: str = "Marly"
+    vat_number: str = "CHE-156.631.035 TVA"
+    vat_rate_standard: float = 2.6   # food & non-alcoholic drinks
+    vat_rate_alcohol: float = 8.1    # beer, wine, spirits
+    delivery_fee_vat_rate: float = 2.6
     phone: str = ""
     address: str = ""
     opening_hours: Dict[str, str] = {}
@@ -292,6 +310,7 @@ class OrderIn(BaseModel):
     requested_time: Optional[str] = None  # "asap" or "HH:MM"
     general_note: Optional[str] = None
     age_confirmed: bool = False
+    save_address: bool = False  # logged-in customers: store the delivery address in the profile
     language: str = "fr"
 
 
@@ -300,12 +319,24 @@ class OrderExtra(BaseModel):
     name: I18n
     unit_price: float
     quantity: int
+    # VAT snapshot at order time (for the whole extra line = unit_price * quantity * item quantity)
+    vat_rate: float = 0.0
+    gross_amount: float = 0.0
+    net_amount: float = 0.0
+    vat_amount: float = 0.0
 
 
 class OrderItemOption(BaseModel):
     key: str
     name: I18n
     price: float
+
+
+class VatGroup(BaseModel):
+    rate: float
+    gross: float
+    net: float
+    vat: float
 
 
 class OrderItem(BaseModel):
@@ -319,6 +350,11 @@ class OrderItem(BaseModel):
     extras: List[OrderExtra] = []
     note: Optional[str] = None
     line_total: float
+    # VAT snapshot at order time (product part = unit_price * quantity, extras carry their own snapshot)
+    vat_rate: float = 0.0
+    gross_amount: float = 0.0
+    net_amount: float = 0.0
+    vat_amount: float = 0.0
 
 
 class Notification(BaseModel):
@@ -347,10 +383,25 @@ class Order(BaseDocument):
     payment_method: str
     language: str = "fr"
     age_confirmed: bool = False
+    age_required: Optional[int] = None  # 16 (beer/wine) or 18 (spirits) – staff/driver must check ID at handover
+    user_id: Optional[str] = None       # customer account (None = guest)
     subtotal: float
     extras_total: float
     delivery_fee: float
     total: float
+    # Fiscal snapshot (all amounts gross = VAT included, CHF)
+    subtotal_gross: float = 0.0
+    delivery_fee_gross: float = 0.0
+    delivery_fee_vat_rate: float = 0.0
+    discount_gross: float = 0.0
+    total_gross: float = 0.0
+    vat_breakdown: List[VatGroup] = []
+    total_vat: float = 0.0
+    total_net: float = 0.0
+    paid: bool = False
+    receipt_printed: bool = False
+    receipt_printed_at: Optional[datetime] = None
+    receipt_print_attempts: int = 0
     created_at: datetime
     accepted_at: Optional[datetime] = None
     estimated_minutes: Optional[int] = None
@@ -386,6 +437,25 @@ async def seed():
         await db.products.insert_many(docs)
     if await db.settings.count_documents({"_id": "main"}) == 0:
         await db.settings.insert_one({"_id": "main", **Settings(**DEFAULT_SETTINGS).model_dump()})
+    else:
+        # One-time fiscal migration for settings created before VAT support
+        sdoc = await db.settings.find_one({"_id": "main"})
+        if "vat_number" not in sdoc:
+            fiscal = {k: DEFAULT_SETTINGS[k] for k in ("business_name", "street", "postal_code", "city", "vat_number",
+                                                      "vat_rate_standard", "vat_rate_alcohol", "delivery_fee_vat_rate", "phone", "address")}
+            await db.settings.update_one({"_id": "main"}, {"$set": fiscal})
+    # Give every product / extra an explicit, editable VAT rate (defaults: alcohol 8.1%, everything else 2.6%)
+    s = await get_settings()
+    await db.products.update_many({"vat_rate": None, "is_alcohol": True}, {"$set": {"vat_rate": s.vat_rate_alcohol}})
+    await db.products.update_many({"vat_rate": None}, {"$set": {"vat_rate": s.vat_rate_standard}})
+    await db.extras.update_many({"vat_rate": None}, {"$set": {"vat_rate": s.vat_rate_standard}})
+    # Alcohol group for age check: existing alcoholic products (beer, wine) are fermented -> 16+
+    await db.products.update_many({"is_alcohol": True, "alcohol_type": None}, {"$set": {"alcohol_type": "fermented"}})
+    await auth_mod.ensure_indexes()
+    try:
+        photos_mod.init_storage()
+    except Exception as e:  # storage unavailable -> uploads will retry lazily
+        logger.warning("Object storage init failed: %s", e)
     logger.info("Seed check complete")
 
 
@@ -556,6 +626,33 @@ def make_notification(event: str, n: int, t: str = "", d: int = 0, r: str = "") 
     ).model_dump()
 
 
+def split_vat(gross: float, rate: float):
+    """VAT-inclusive split: net = gross / (1 + rate), vat = gross - net. Rounded to 0.01, always reconciling."""
+    gross = round(gross, 2)
+    net = round(gross / (1 + rate / 100.0), 2)
+    return gross, net, round(gross - net, 2)
+
+
+def vat_breakdown(groups: Dict[float, float], discount: float = 0.0) -> List[VatGroup]:
+    """Group gross amounts per rate. A (future) discount is allocated proportionally to each rate group so
+    net + vat always equals the customer total."""
+    total = sum(groups.values())
+    out: List[VatGroup] = []
+    allocated = 0.0
+    rates = sorted(groups)
+    for i, rate in enumerate(rates):
+        gross = groups[rate]
+        if discount and total:
+            share = round(discount * gross / total, 2) if i < len(rates) - 1 else round(discount - allocated, 2)
+            allocated += share
+            gross -= share
+        if round(gross, 2) == 0:
+            continue
+        g, n, v = split_vat(gross, rate)
+        out.append(VatGroup(rate=rate, gross=g, net=n, vat=v))
+    return out
+
+
 async def next_order_number() -> int:
     doc = await db.counters.find_one_and_update(
         {"_id": "orders"}, {"$inc": {"seq": 1}}, upsert=True, return_document=ReturnDocument.AFTER
@@ -570,8 +667,14 @@ async def load_order(order_id: str) -> dict:
     return doc
 
 
+def required_age(products: List[dict]) -> Optional[int]:
+    """16+ for fermented drinks (beer, wine, prosecco), 18+ for spirits. Mixed cart -> 18+."""
+    ages = [18 if p.get("alcohol_type") == "spirits" else 16 for p in products if p.get("is_alcohol")]
+    return max(ages) if ages else None
+
+
 @api.post("/orders", response_model=Order)
-async def create_order(body: OrderIn, request: Request):
+async def create_order(body: OrderIn, request: Request, user: Optional[dict] = Depends(auth_mod.optional_user)):
     settings = await get_settings()
     if settings.temporarily_closed:
         raise HTTPException(400, "Restaurant temporarily closed")
@@ -588,7 +691,8 @@ async def create_order(body: OrderIn, request: Request):
     items: List[OrderItem] = []
     subtotal = 0.0
     extras_total = 0.0
-    has_alcohol = False
+    alcohol_products: List[dict] = []
+    vat_groups: Dict[float, float] = {}
     for it in body.items:
         pdoc = await db.products.find_one({"_id": oid(it.product_id), "deleted_at": None})
         if not pdoc:
@@ -596,7 +700,11 @@ async def create_order(body: OrderIn, request: Request):
         if not pdoc.get("available", True):
             raise HTTPException(400, f"{pdoc['name']['fr']} n'est plus disponible")
         if pdoc.get("is_alcohol"):
-            has_alcohol = True
+            alcohol_products.append(pdoc)
+        prod_rate = pdoc.get("vat_rate")
+        if prod_rate is None:
+            prod_rate = settings.vat_rate_alcohol if pdoc.get("is_alcohol") else settings.vat_rate_standard
+        qty = max(1, it.quantity)
         allowed = set(pdoc.get("allowed_extra_ids", []))
         ex_list: List[OrderExtra] = []
         ex_sum = 0.0
@@ -604,9 +712,15 @@ async def create_order(body: OrderIn, request: Request):
             edoc = extras_by_id.get(ex.extra_id)
             if not edoc or (edoc["key"] not in allowed and ex.extra_id not in allowed):
                 raise HTTPException(400, "Extra not allowed for this product")
-            qty = max(1, min(ex.quantity, edoc.get("max_quantity", 1)))
-            ex_list.append(OrderExtra(extra_id=ex.extra_id, name=I18n(**edoc["name"]), unit_price=edoc["price"], quantity=qty))
-            ex_sum += edoc["price"] * qty
+            eqty = max(1, min(ex.quantity, edoc.get("max_quantity", 1)))
+            ex_rate = edoc.get("vat_rate")
+            if ex_rate is None:
+                ex_rate = settings.vat_rate_standard
+            eg, en, ev = split_vat(edoc["price"] * eqty * qty, ex_rate)
+            vat_groups[ex_rate] = vat_groups.get(ex_rate, 0.0) + eg
+            ex_list.append(OrderExtra(extra_id=ex.extra_id, name=I18n(**edoc["name"]), unit_price=edoc["price"], quantity=eqty,
+                                      vat_rate=ex_rate, gross_amount=eg, net_amount=en, vat_amount=ev))
+            ex_sum += edoc["price"] * eqty
         removed = [Ingredient(**i) for i in pdoc.get("ingredients", []) if i["id"] in set(it.removed_ingredient_ids)]
         # Size
         size: Optional[SizeOption] = None
@@ -631,12 +745,16 @@ async def create_order(body: OrderIn, request: Request):
         line_total = round((unit + ex_sum) * qty, 2)
         subtotal += unit * qty
         extras_total += ex_sum * qty
+        pg, pn, pv = split_vat(unit * qty, prod_rate)
+        vat_groups[prod_rate] = vat_groups.get(prod_rate, 0.0) + pg
         items.append(OrderItem(
             product_id=it.product_id, name=I18n(**pdoc["name"]), unit_price=unit, quantity=qty, size=size, options=opts,
             removed_ingredients=removed, extras=ex_list, note=(it.note or None), line_total=line_total,
+            vat_rate=prod_rate, gross_amount=pg, net_amount=pn, vat_amount=pv,
         ))
-    if has_alcohol and not body.age_confirmed:
-        raise HTTPException(400, "Age confirmation required for alcoholic drinks")
+    age_req = required_age(alcohol_products)
+    if age_req and not body.age_confirmed:
+        raise HTTPException(400, f"Confirmation d'âge requise ({age_req}+) pour les boissons alcoolisées")
 
     goods = round(subtotal + extras_total, 2)
     delivery_fee = 0.0
@@ -651,6 +769,12 @@ async def create_order(body: OrderIn, request: Request):
         if settings.free_delivery_from and goods >= settings.free_delivery_from:
             delivery_fee = 0.0
     total = round(goods + delivery_fee, 2)
+    if delivery_fee > 0:
+        vat_groups[settings.delivery_fee_vat_rate] = vat_groups.get(settings.delivery_fee_vat_rate, 0.0) + round(delivery_fee, 2)
+    discount = 0.0  # promotions not implemented yet – allocation across VAT groups is handled in vat_breakdown()
+    breakdown = vat_breakdown(vat_groups, discount)
+    total_net = round(sum(g.net for g in breakdown), 2)
+    total_vat = round(sum(g.vat for g in breakdown), 2)
 
     number = await next_order_number()
     ts = now_utc()
@@ -659,13 +783,37 @@ async def create_order(body: OrderIn, request: Request):
         customer=body.customer, address=body.address if body.type == "delivery" else None,
         requested_time=body.requested_time, general_note=body.general_note or None,
         payment_method="pay_at_delivery" if body.type == "delivery" else "pay_at_pickup",
-        language=body.language, age_confirmed=body.age_confirmed,
+        language=body.language, age_confirmed=bool(age_req) and body.age_confirmed, age_required=age_req,
+        user_id=str(user["_id"]) if user else None,
         subtotal=round(subtotal, 2), extras_total=round(extras_total, 2), delivery_fee=delivery_fee, total=total,
+        subtotal_gross=goods, delivery_fee_gross=round(delivery_fee, 2), delivery_fee_vat_rate=settings.delivery_fee_vat_rate if delivery_fee > 0 else 0.0,
+        discount_gross=discount, total_gross=total, vat_breakdown=breakdown, total_vat=total_vat, total_net=total_net,
         created_at=ts, status_history=[StatusEvent(status="pending", at=ts)],
         notifications=[Notification(**make_notification("order_received", number))],
     )
     res = await db.orders.insert_one(order.to_mongo())
+    if user and body.save_address and body.type == "delivery" and body.address:
+        await auth_mod.save_address_for_user(user, body.address.model_dump())
     return Order.from_mongo(await db.orders.find_one({"_id": res.inserted_id}))
+
+
+@api.get("/me/orders", response_model=List[Order])
+async def my_orders(user: dict = Depends(auth_mod.current_user), limit: int = 50):
+    docs = await db.orders.find({"user_id": str(user["_id"])}).sort("created_at", -1).to_list(limit)
+    return [Order.from_mongo(d) for d in docs]
+
+
+@api.get("/customers/search")
+async def search_customers(phone: str = Query(min_length=3), limit: int = 20):
+    """Staff / phone-order lookup: accounts + past orders matching a phone number (accounts and guests)."""
+    digits = auth_mod.normalize_phone(phone)
+    if len(digits) < 3:
+        raise HTTPException(400, "Numéro trop court")
+    accounts = [auth_mod.user_out(u).model_dump() async for u in db.users.find({"phone": {"$regex": digits}}).limit(limit)]
+    # Guest orders store the phone as typed -> compare on digits only
+    pattern = r"\D*".join(digits)
+    docs = await db.orders.find({"customer.phone": {"$regex": pattern}}).sort("created_at", -1).to_list(limit)
+    return {"accounts": accounts, "orders": [Order.from_mongo(d).model_dump() for d in docs]}
 
 
 @api.get("/orders", response_model=List[Order])
@@ -724,12 +872,12 @@ PRINTNODE_API_KEY = os.environ.get("PRINTNODE_API_KEY", "")
 PRINTNODE_PRINTER_ID = os.environ.get("PRINTNODE_PRINTER_ID", "")
 
 
-async def send_to_printer(order_doc: dict, text: str) -> str:
+async def send_to_printer(order_doc: dict, text: str, kind: str = "kitchen") -> str:
     """Create a print job. Returns status: 'sent' | 'failed' | 'simulated'.
     With PrintNode credentials configured, this posts a raw job to the Epson TM-T70II via PrintNode.
     Without credentials the job is only recorded (simulated) – nothing touches the existing installation."""
     job = {
-        "order_id": str(order_doc["_id"]), "order_number": order_doc["order_number"], "provider": "printnode",
+        "order_id": str(order_doc["_id"]), "order_number": order_doc["order_number"], "provider": "printnode", "kind": kind,
         "printer_id": PRINTNODE_PRINTER_ID or None, "content": text, "created_at": now_utc(), "status": "queued",
     }
     if not PRINTNODE_API_KEY or not PRINTNODE_PRINTER_ID:
@@ -889,6 +1037,8 @@ def build_ticket(o: dict, settings: Settings) -> str:
     if o.get("estimated_ready_at"):
         lines.append(("PRET VERS " if o["type"] == "pickup" else "LIVRAISON VERS ") + fmt_time(o["estimated_ready_at"]))
     lines.append("Recue: " + fmt_time(o["created_at"]))
+    if o.get("age_required"):
+        lines += ["", "!" * W, c(f"ALCOOL - CONTROLE AGE {o['age_required']}+"), c("VERIFIER LA PIECE D'IDENTITE"), "!" * W]
     lines += ["-" * W]
     for it in o["items"]:
         size = f" {it['size']['label'].upper()}" if it.get("size") else ""
@@ -947,6 +1097,95 @@ async def list_print_jobs(limit: int = 50):
     return docs
 
 
+# ---------------------------------------------------------------------------
+# Customer receipt (fiscal, VAT included) – separate from the kitchen ticket
+# ---------------------------------------------------------------------------
+def money(v: float) -> str:
+    return f"CHF {v:.2f}"
+
+
+def build_receipt(o: dict, s: Settings) -> str:
+    W = 42  # 80mm, font B ~ 42 chars
+    c = lambda t: t.center(W)  # noqa: E731
+    row = lambda label, amount: f"{label[:W - 12]:<{W - 12}}{amount:>12}"  # noqa: E731
+    created = o["created_at"] if o["created_at"].tzinfo else o["created_at"].replace(tzinfo=timezone.utc)
+    local = created.astimezone(TZ)
+    lines: List[str] = [
+        c(s.business_name.upper()), c(s.street), c(f"{s.postal_code} {s.city}"), c(f"Tél. {s.phone}"), c(s.vat_number), "",
+        c("REÇU / QUITTANCE"), "=" * W,
+        f"Commande n° {o['order_number']}",
+        f"Date: {local.strftime('%d.%m.%Y')}    Heure: {local.strftime('%H:%M')}",
+        "RETRAIT" if o["type"] == "pickup" else "LIVRAISON",
+    ]
+    if o.get("estimated_ready_at"):
+        lines.append(("Retrait confirmé: " if o["type"] == "pickup" else "Livraison confirmée: ") + fmt_time(o["estimated_ready_at"]))
+    cust = o["customer"]
+    lines += ["-" * W, f"Client: {cust['first_name']} {cust.get('last_name', '')}".strip(), f"Tél: {cust['phone']}"]
+    if o["type"] == "delivery" and o.get("address"):
+        a = o["address"]
+        lines.append(f"Adresse: {a['street']} {a.get('number', '')}".strip() + f", {a['npa']} {a['city']}")
+    lines += ["-" * W]
+    for it in o["items"]:
+        size = f" {it['size']['label']}" if it.get("size") else ""
+        lines.append(row(f"{it['quantity']}x {it['name']['fr']}{size}", money(it["unit_price"] * it["quantity"])))
+        if it["quantity"] > 1:
+            lines.append(f"   ({money(it['unit_price'])} / pce)")
+        for op in it.get("options", []):
+            if op.get("price"):
+                lines.append(f"   * {op['name']['fr']}")
+        for e in it.get("extras", []):
+            q = f"{e['quantity']}x " if e["quantity"] > 1 else ""
+            lines.append(row(f"   + {q}{e['name']['fr']}", money(e["unit_price"] * e["quantity"] * it["quantity"])))
+        for r in it.get("removed_ingredients", []):
+            lines.append(row(f"   - sans {r['fr']}", money(0)))
+        if it.get("extras") or it["quantity"] > 1:
+            lines.append(row("   Total ligne", money(it["line_total"])))
+    lines += ["-" * W, row("Sous-total", money(o.get("subtotal_gross", o["total"] - o.get("delivery_fee", 0))))]
+    if o.get("delivery_fee"):
+        lines.append(row("Frais de livraison", money(o["delivery_fee"])))
+    if o.get("discount_gross"):
+        lines.append(row("Remise", f"-{money(o['discount_gross'])}"))
+    lines += ["=" * W, row("TOTAL", money(o["total"])), "=" * W,
+              "Paiement au retrait" if o["type"] == "pickup" else "Paiement à la livraison",
+              "Statut: " + ("PAYÉ" if o.get("paid") else "à payer"), "", "TVA INCLUSE"]
+    for g in o.get("vat_breakdown", []):
+        lines += [f"TVA {g['rate']:.1f}%", row("  Base HT", money(g["net"])), row("  TVA", money(g["vat"]))]
+    if o.get("vat_breakdown"):
+        lines += [row("Total HT", money(o["total_net"])), row("Total TVA", money(o["total_vat"]))]
+    lines += ["", c(s.vat_number), c("Merci de votre visite / Danke!"), ""]
+    return "\n".join(lines)
+
+
+@api.get("/orders/{order_id}/receipt")
+async def get_receipt(order_id: str):
+    doc = await load_order(order_id)
+    s = await get_settings()
+    return {"order_id": order_id, "order_number": doc["order_number"], "text": build_receipt(doc, s),
+            "printed": doc.get("receipt_printed", False), "printed_at": doc.get("receipt_printed_at"),
+            "print_attempts": doc.get("receipt_print_attempts", 0), "vat_breakdown": doc.get("vat_breakdown", []),
+            "total_net": doc.get("total_net"), "total_vat": doc.get("total_vat"), "total": doc["total"]}
+
+
+@api.post("/orders/{order_id}/receipt/print")
+async def print_receipt(order_id: str, body: PrintIn = PrintIn()):
+    """Print / re-print the customer receipt (same simulated PrintNode pipeline as the kitchen ticket)."""
+    doc = await load_order(order_id)
+    if doc.get("receipt_printed") and not body.force:
+        raise HTTPException(409, "Receipt already printed")
+    s = await get_settings()
+    text = build_receipt(doc, s)
+    status = await send_to_printer(doc, text, kind="receipt")
+    new = await db.orders.find_one_and_update(
+        {"_id": doc["_id"]},
+        {"$set": {"receipt_printed": True, "receipt_printed_at": now_utc()}, "$inc": {"receipt_print_attempts": 1}},
+        return_document=ReturnDocument.AFTER,
+    )
+    return {"ok": True, "printed": True, "printed_at": new["receipt_printed_at"], "print_attempts": new["receipt_print_attempts"],
+            "print_status": status, "text": text}
+
+
+api.include_router(auth_mod.router)
+api.include_router(photos_mod.router)
 app.include_router(api)
 
 app.add_middleware(

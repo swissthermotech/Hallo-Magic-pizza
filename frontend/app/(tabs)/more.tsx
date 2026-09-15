@@ -6,6 +6,7 @@ import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useMenu } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
 import { LanguageToggle } from "./index";
 
@@ -22,6 +23,7 @@ export default function MoreScreen() {
   const { t, tx, lang } = useI18n();
   const { data } = useMenu();
   const s = data?.settings;
+  const { user } = useAuth();
 
   const Row = ({ icon, label, onPress, testID, sub }: { icon: React.ComponentProps<typeof Feather>["name"]; label: string; onPress: () => void; testID: string; sub?: string }) => (
     <Pressable testID={testID} onPress={onPress} style={({ pressed }) => [styles.row, pressed && { opacity: 0.8 }]}>
@@ -42,8 +44,10 @@ export default function MoreScreen() {
       </View>
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 20 }}>
         <View>
-          <Text style={styles.section}>{t("myOrders")}</Text>
+          <Text style={styles.section}>{t("account")}</Text>
           <View style={styles.card}>
+            <Row icon="user" label={user ? `${user.first_name} ${user.last_name}`.trim() : t("account")} sub={user ? user.phone : t("accountHint")} onPress={() => router.push("/account")} testID="more-account" />
+            <View style={styles.sep} />
             <Row icon="clock" label={t("myOrders")} onPress={() => router.push("/(tabs)/orders")} testID="more-my-orders" />
           </View>
         </View>

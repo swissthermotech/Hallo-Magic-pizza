@@ -28,6 +28,7 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
       <View style={styles.cardHead}>
         <Text style={styles.cardNum}>#{o.order_number}</Text>
         <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
+          {o.age_required ? <Badge label={`${o.age_required}+`} tone="warning" testID={`staff-card-age-${o.id}`} /> : null}
           <Badge label={sourceLabel(o.source)} tone="inverse" />
           <Badge label={o.type === "pickup" ? t("pickup").toUpperCase() : t("delivery").toUpperCase()} tone={o.type === "pickup" ? "success" : "brand"} />
         </View>
@@ -85,8 +86,10 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
     : sel?.minutes !== undefined
       ? new Date(Date.now() + sel.minutes * 60000).toLocaleTimeString("fr-CH", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Zurich" })
       : "";
-  const openTicket = () => {
-    const go = () => router.push({ pathname: "/staff/ticket/[id]", params: { id: o.id } });
+  const openTicket = () => openStaffScreen("/staff/ticket/[id]");
+  const openReceipt = () => openStaffScreen("/staff/receipt/[id]");
+  const openStaffScreen = (pathname: "/staff/ticket/[id]" | "/staff/receipt/[id]") => {
+    const go = () => router.push({ pathname, params: { id: o.id } });
     if (onClose) {
       // Detail is shown inside a Modal on phones: close it first, otherwise the ticket screen opens hidden behind it.
       onClose();
@@ -139,9 +142,20 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
         ) : null}
       </View>
 
+      {/* Alcohol – age check at handover (pickup counter or delivery driver) */}
+      {o.age_required ? (
+        <View style={styles.ageBox} testID="staff-age-check">
+          <Feather name="alert-triangle" size={26} color={colors.onWarning} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.ageTitle}>{t("ageCheckRequired")}: {o.age_required}+</Text>
+            <Text style={styles.ageSub}>{t("ageCheckHint")}</Text>
+          </View>
+        </View>
+      ) : null}
+
       {/* Customer */}
       <View style={styles.box}>
-        <Text style={styles.boxTitle}>{o.customer.first_name} {o.customer.last_name}</Text>
+        <Text style={styles.boxTitle}>{o.customer.first_name} {o.customer.last_name}{o.user_id ? "  ·  ★" : ""}</Text>
         <Text style={styles.boxText}>{o.customer.phone}{o.customer.email ? ` · ${o.customer.email}` : ""}</Text>
         {o.address ? <Text style={styles.boxText}>{o.address.street} {o.address.number}, {o.address.npa} {o.address.city}{o.address.instructions ? `\n${o.address.instructions}` : ""}</Text> : null}
       </View>
@@ -245,6 +259,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
             testID="staff-print-button"
           />
         </View>
+        <Button title={`${t("receiptPreview")}${o.receipt_printed ? ` · ${t("printed")} ${o.receipt_print_attempts}x` : ""}`} variant="outline" icon="file" onPress={openReceipt} style={{ marginTop: 10 }} testID="staff-receipt-preview" />
       </View>
     </ScrollView>
   );
@@ -270,6 +285,9 @@ const useStyles = makeStyles((colors) => ({
   timeLabel: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   timeValue: { fontFamily: FONT_DISPLAY, fontSize: 30, color: colors.onSurface, marginTop: 2 },
   timeSub: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.warning, fontWeight: "700" },
+  ageBox: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.warning, borderRadius: 14, padding: 14 },
+  ageTitle: { fontFamily: FONT_TEXT, fontSize: 17, fontWeight: "900", color: colors.onWarning, letterSpacing: 0.4 },
+  ageSub: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "600", color: colors.onWarning, opacity: 0.9, marginTop: 2 },
   box: { backgroundColor: colors.surfaceSecondary, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 4 },
   boxTitle: { fontFamily: FONT_TEXT, fontSize: 18, fontWeight: "800", color: colors.onSurface },
   boxText: { fontFamily: FONT_TEXT, fontSize: 15, color: colors.onSurfaceSecondary, lineHeight: 21 },

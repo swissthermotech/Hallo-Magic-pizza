@@ -1,0 +1,26 @@
+{
+  "summary": "Full VAT/TVA feature re-verification against the public backend URL and the Expo web preview (390x844). Backend: 15/15 pytest tests pass in /app/backend/tests/test_vat_receipt.py – covers Settings fiscal fields presence & PUT roundtrip, GET /api/menu vat_rate correctness (Diavola/Coca 2.6; Bière Moretti/Nero d'Avola 8.1; all 29 extras 2.6), 7 order scenarios (food-only 2.6; food+Coca single 2.6 group; food+beer with beer item vat_rate=8.1 and both 2.6/8.1 groups; food 40cm + moz_extra + champignons + wine with per-extra snapshot reconciliation; delivery to 1723 Marly with delivery_fee=5.0 & delivery_fee_vat_rate=8.1 producing delivery_fee_gross=5.0 in 8.1 group; 7x Coca gross=24.50; decimal-price Profiteroles*3+Tiramisu). Reconciliation on every order: sum(line_total)+delivery_fee==total, total_net+total_vat==total, each group net+vat==gross, sum(group gross)==total, no empty rate groups. Historical snapshot preserved: after PATCH Diavola.vat_rate=8.1, the pre-existing order still returns items[0].vat_rate=2.6 and identical vat_breakdown (restored to 2.6). Receipt: GET /api/orders/{id}/receipt contains 'HALLO MAGIC PIZZA', 'Route de Chésalles 19', '1723 Marly', 'Tél. 026 430 00 96', 'CHE-156.631.035 TVA', 'Commande n°', 'TOTAL', 'TVA INCLUSE', 'TVA 2.6%'; food-only receipts do NOT contain 'TVA 8.1%'; mixed 2.6+8.1 receipts contain both. POST /api/orders/{id}/receipt/print returns printed=true, print_attempts=1; second call without force -> 409; force=true -> attempts=2. Kitchen ticket GET /api/orders/{id}/ticket does NOT contain 'TVA INCLUSE'. Frontend (Expo web preview, PIN 1234): /staff/admin/settings shows Fiscal/TVA section with all requested testIDs, fields prefilled with the real business data (Route de Chésalles 19 / 1723 / Marly / CHE-156.631.035 TVA); toggled settings-vat-delivery-81 -> settings-save -> reloaded -> 8.1 pill selected (brandPrimary border), then switched to settings-vat-delivery-26 -> saved -> restored. /staff/admin product rows display admin-vat-{id} badges ('TVA 2.6%' for Diavola, 'TVA 8.1%' for Bière Moretti). Product editor for Diavola shows editor-vat-26 & editor-vat-81 (no alcohol badge); switched to 8.1, saved, GET /api/products/{diavola} confirmed vat_rate=8.1, then restored to 2.6 via API. Beer product editor renders editor-alcohol-badge. Extras editor: tapping any extra opens extra-editor with extra-vat-26/81 picker; save preserves vat_rate. Staff order detail exposes staff-receipt-preview which navigates to /staff/receipt/{id}; receipt-text renders full 80mm content with 'TVA INCLUSE'; receipt-print-button flips receipt-print-status from 'Non imprimé' -> 'Imprimé 1x'; receipt-reprint-button -> 'Imprimé 2x'. Customer /order/{id} page displays order-vat-breakdown with 'TVA INCLUSE\\nTVA 2.6% · Base HT CHF 17.54 · TVA CHF 0.46'. All temporary mutations (settings.delivery_fee_vat_rate, products.diavola.vat_rate) restored after tests.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_vat_receipt.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Receipt print endpoint returns print_attempts (not attempts) - test updated to accept either key. Consider standardising key name in API response.",
+    "VatPicker in /app/frontend/src/components/ui.tsx correctly derives child testIDs as {parent}-26 / {parent}-81 by stripping the decimal point (String(r).replace('.', ''))."
+  ],
+  "updated_files": ["/app/backend/tests/test_vat_receipt.py"],
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100%"},
+  "seed_data_creation": "Created ~10 pytest orders (all customer prefixed 'TEST') via POST /api/orders. Extra frontend order #144 created with test customer 'TEST-FE Receipt' (order id 6aa96ae8aa90fe04eeee83eb) used for the receipt/reprint & customer VAT breakdown UI checks; it was left as printed=true, print_attempts=2 in DB (no cleanup needed, non-destructive).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Public backend URL is https://hallo-magic-test.preview.emergentagent.com; frontend/.env exposes EXPO_PUBLIC_BACKEND_URL and EXPO_PUBLIC_STAFF_PIN=1234. Reusable pytest at /app/backend/tests/test_vat_receipt.py restores mutated settings & products in fixtures/finally blocks. Key product IDs: diavola=6aa94a928068d15c2420f9ea, coca=6aa94a928068d15c2420fa0c, beer(Moretti)=6aa94a928068d15c2420fa18, wine(Nero d'Avola)=6aa94a928068d15c2420fa19, ex_moz=6aa94a928068d15c2420f9e1, ex_champ=6aa94a928068d15c2420f9ca, tiramisu=6aa94a928068d15c2420fa08, profit=6aa94a928068d15c2420fa09. VatPicker child testIDs use rate with '.' stripped (26 / 81). Receipt print response uses key print_attempts. Order id used for the manual FE walk-through: 6aa96ae8aa90fe04eeee83eb (order_number 144).",
+  "rca_of_issue": "N/A – feature verified as designed. Only cosmetic React Native Web warnings observed in console (shadow* / pointerEvents deprecations) – already known and unrelated to VAT feature."
+}

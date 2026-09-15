@@ -234,8 +234,16 @@ ZONES = [
 
 DEFAULT_SETTINGS = {
     "restaurant_name": "Hallo Magic Pizza",
-    "phone": "026 000 00 00",
-    "address": "Marly, 1723 (FR)",
+    "business_name": "Hallo Magic Pizza",
+    "street": "Route de Chésalles 19",
+    "postal_code": "1723",
+    "city": "Marly",
+    "vat_number": "CHE-156.631.035 TVA",
+    "vat_rate_standard": 2.6,
+    "vat_rate_alcohol": 8.1,
+    "delivery_fee_vat_rate": 2.6,
+    "phone": "026 430 00 96",
+    "address": "Route de Chésalles 19, 1723 Marly",
     "opening_hours": {
         "mon": "11:00-13:30, 17:30-21:30", "tue": "11:00-13:30, 17:30-21:30", "wed": "11:00-13:30, 17:30-21:30",
         "thu": "11:00-13:30, 17:30-21:30", "fri": "11:00-13:30, 17:30-22:00", "sat": "17:30-22:00", "sun": "17:30-21:30",

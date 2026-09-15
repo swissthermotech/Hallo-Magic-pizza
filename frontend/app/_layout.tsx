@@ -12,6 +12,7 @@ import { queryClient } from "@/src/query-client";
 import { LanguageProvider } from "@/src/i18n";
 import { CartProvider } from "@/src/cart";
 import { StaffProvider } from "@/src/staff-auth";
+import { AuthProvider } from "@/src/auth";
 import { ToastProvider } from "@/src/components/ui";
 import { themes } from "@/src/theme";
 
@@ -45,6 +46,7 @@ export default function RootLayout() {
             <KeyboardProvider>
               <LanguageProvider>
                 <CartProvider>
+                  <AuthProvider>
                   <StaffProvider>
                   <ToastProvider>
                     <StatusBar style="dark" />
@@ -53,10 +55,13 @@ export default function RootLayout() {
                       <Stack.Screen name="product/[id]" options={{ presentation: "modal" }} />
                       <Stack.Screen name="checkout" />
                       <Stack.Screen name="order/[id]" />
+                      <Stack.Screen name="account/index" />
+                      <Stack.Screen name="account/address" options={{ presentation: "modal" }} />
                       <Stack.Screen name="staff" />
                     </Stack>
                   </ToastProvider>
                   </StaffProvider>
+                  </AuthProvider>
                 </CartProvider>
               </LanguageProvider>
             </KeyboardProvider>

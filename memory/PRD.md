@@ -38,12 +38,24 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Staff area separated & protected: hidden from customers (small "Accès restaurant" link in Plus tab), PIN gate at `/staff/login` (PIN from `EXPO_PUBLIC_STAFF_PIN` in frontend/.env, default 1234, remembered on device; lock button in dashboard header).
 - Direct staff URL: `<preview-url>/staff` (redirects to `/staff/login` until unlocked). Kitchen `/staff/kitchen`, Admin `/staff/admin`.
 
+## Implemented (2026-06) – VAT / TVA & customer receipt
+- Fiscal settings (admin → Paramètres → Fiscal / TVA): raison sociale, Route de Chésalles 19, 1723 Marly, Tél. 026 430 00 96, CHE-156.631.035 TVA, standard rate 2.6%, alcohol rate 8.1%, delivery-fee VAT rate.
+- Every product and every extra has an editable `vat_rate` (2.6 / 8.1) in admin; alcohol products flagged 18+.
+- Orders store a VAT snapshot (per item, per extra, per rate group, totals net/vat/gross, discount allocation prepared). Historical orders never change.
+- Customer receipt (80 mm, `/api/orders/{id}/receipt`, staff screen `/staff/receipt/{id}`, print/reprint, simulated PrintNode) – separate from the kitchen ticket. Customer tracker shows "TVA incluse" lines.
+- Tests: `/app/backend/tests/vat_scenarios.py` (7 scenarios) and `/app/backend/tests/test_vat_receipt.py`.
+
+## Implemented (2026-06) – age check, customer accounts, product photos
+- Alcohol age check (dynamic): product `alcohol_type` = fermented (beer, wine, prosecco -> 16+) | spirits (-> 18+); mixed cart -> 18+. Checkout checkbox is mandatory with 16+/18+ text, order stores `age_required` + `age_confirmed`, kitchen ticket prints "ALCOOL - CONTROLE AGE 16+/18+ / VERIFIER LA PIECE D'IDENTITE", staff order detail shows an orange age-check banner (serves pickup counter and delivery driver), kitchen card + order cards show the badge. Admin editor: alcohol type picker.
+- Optional customer accounts (`/app/backend/auth.py`, JWT 30 days, Argon2 via pwdlib, phone = login id, normalised to 0XXXXXXXXX): register/login/profile/saved addresses/order history at `/account` (+ `/account/address` modal). Checkout prefills details, offers saved-address chips and "save this address". Orders store `user_id` (null = guest); guest checkout unchanged. Orders tab merges device orders + account history. Staff lookup `/staff/customers` (GET `/api/customers/search?phone=`) finds accounts and guest orders by phone digits.
+- Product photos (`/app/backend/photos.py`): `POST /api/uploads/product-photo` (multipart) -> Pillow optimisation (EXIF fix, max 1600px, progressive JPEG q86) -> Emergent Object Storage (`hallo-magic-pizza/products/<uuid>.jpg`) -> public `GET /api/files/{path}` with disk cache. Product fields `image_url` (main) + `images[]` (additional). Admin PhotoManager: add/replace/remove main, add multiple extras, set-as-main, preview before Save; permission flow with Open Settings. `imgUri()` resolves API-relative urls on web & native. Placeholders (Unsplash) remain until real photos are uploaded.
+- Tests: `/app/backend/tests/test_iter5_accounts_alcohol_photos.py` (21, run with `-n 0`).
+
 ## Backlog
 - P0: PrintNode live credentials + real ESC/POS ticket test on Epson TM-T70II; staff PIN protection.
-- P1: real push notifications (Emergent push after build), customer accounts (saved address, history, reorder, favourites), web layout polish for desktop widths, photo upload via object storage instead of URL, category manager UI, extras per-size pricing.
+- P1: real push notifications (Emergent push after build), favourites + one-tap reorder for account holders, dedicated driver view (age-check warning already in staff detail), web layout polish for desktop widths, category manager UI, extras per-size pricing.
 - P2: opening-hours enforcement at checkout, order history/statistics, courier assignment screen, multi-printer routing, dark mode.
 
 ## Next tasks
 1. Collect PrintNode API key + printer ID and test a real print.
-2. Add staff PIN and hide staff links from customers.
 3. Wire push notifications after first publish/build.

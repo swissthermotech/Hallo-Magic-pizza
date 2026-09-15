@@ -1,14 +1,16 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { statusLabel, useI18n } from "@/src/i18n";
-import { useOrdersByIds } from "@/src/api";
+import { useMyAccountOrders, useOrdersByIds } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { useCart } from "@/src/cart";
 import { chf, fmtTime, statusTone } from "@/src/format";
 import { Badge, Button, Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
+import type { Order } from "@/src/types";
 
 export default function OrdersScreen() {
   const styles = useStyles();
@@ -18,14 +20,21 @@ export default function OrdersScreen() {
   const { t, tx } = useI18n();
   const { myOrderIds } = useCart();
   const { data, refetch, isRefetching } = useOrdersByIds(myOrderIds);
-  const orders = data ?? [];
+  const { user } = useAuth();
+  const { data: accountOrders } = useMyAccountOrders(!!user);
+  // Device orders (guest) + account history, de-duplicated, newest first
+  const orders = useMemo(() => {
+    const map = new Map<string, Order>();
+    [...(data ?? []), ...(accountOrders ?? [])].forEach((o) => map.set(o.id, o));
+    return [...map.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }, [data, accountOrders]);
 
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Text style={styles.title} testID="orders-title">{t("myOrders")}</Text>
       </View>
-      {myOrderIds.length === 0 ? (
+      {orders.length === 0 ? (
         <Empty icon="clock" title={t("noOrders")} hint={t("noOrdersHint")} action={<Button title={t("browseMenu")} onPress={() => router.push("/(tabs)")} testID="orders-browse-menu-button" />} />
       ) : (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 12 }} refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.brandPrimary} />}>

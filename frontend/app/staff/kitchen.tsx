@@ -57,6 +57,7 @@ export default function KitchenScreen() {
                     <Text style={styles.elapsed}>{elapsedMinutes(o.created_at)} min · {o.type === "pickup" ? t("pickup") : t("delivery")}</Text>
                   </View>
                 </View>
+                {o.age_required ? <Text style={styles.age} testID={`kitchen-age-${o.id}`}>⚠ {t("ageCheckRequired")}: {o.age_required}+</Text> : null}
                 <OrderLines items={o.items} size="lg" showPrices={false} lang="fr" />
                 {o.general_note ? <Text style={styles.note}>NOTE: {o.general_note.toUpperCase()}</Text> : null}
                 <View style={styles.cardFoot}>
@@ -96,6 +97,7 @@ const useStyles = makeStyles((colors) => ({
   eta: { fontFamily: FONT_DISPLAY, fontSize: 28, color: colors.brandSecondary },
   elapsed: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted },
   note: { fontFamily: FONT_TEXT, fontSize: 17, fontWeight: "800", color: colors.warning },
+  age: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "900", color: colors.onWarning, backgroundColor: colors.warning, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   cardFoot: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 4 },
   bigBtn: { flexDirection: "row", alignItems: "center", gap: 8, height: 56, paddingHorizontal: 18, borderRadius: 14 },
   bigBtnText: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.onBrandPrimary, letterSpacing: 0.5 },

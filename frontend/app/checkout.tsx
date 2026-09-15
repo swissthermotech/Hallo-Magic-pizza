@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,8 +9,9 @@ import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useMenu, usePlaceOrder } from "@/src/api";
 import { useCart } from "@/src/cart";
+import { useAuth } from "@/src/auth";
 import { chf } from "@/src/format";
-import { Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
+import { Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
 import { OrderTypeSelector } from "./(tabs)/index";
 import type { OrderType } from "@/src/types";
 
@@ -45,6 +46,23 @@ export default function CheckoutScreen() {
   const slots = useMemo(timeSlots, []);
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
+  // Optional account: prefill contact details + saved addresses (guest checkout unchanged)
+  const { user } = useAuth();
+  const [savedAddrId, setSavedAddrId] = useState<string | null>(null);
+  const [saveAddress, setSaveAddress] = useState(true);
+  useEffect(() => {
+    if (!user) return;
+    setF((p) => ({ ...p, first_name: p.first_name || user.first_name, last_name: p.last_name || user.last_name, phone: p.phone || user.phone, email: p.email || user.email || "" }));
+    if (user.addresses.length && !savedAddrId) pickSavedAddress(user.addresses[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+  const pickSavedAddress = (id: string | null) => {
+    setSavedAddrId(id);
+    const a = user?.addresses.find((x) => x.id === id);
+    if (a) setF((p) => ({ ...p, street: a.street, number: a.number, npa: a.npa, city: a.city, instructions: a.instructions || "" }));
+    else setF((p) => ({ ...p, street: "", number: "", npa: "", city: "", instructions: "" }));
+  };
+
   const zone = settings?.delivery_zones.find((z) => z.npa === f.npa.trim());
   const zoneMissing = type === "delivery" && !!settings?.delivery_zones.length && f.npa.trim().length >= 4 && !zone;
   const minimum = zone?.minimum_order || settings?.minimum_order || 0;
@@ -71,6 +89,7 @@ export default function CheckoutScreen() {
         requested_time: requestedTime,
         general_note: cart.generalNote.trim() || undefined,
         age_confirmed: ageOk,
+        save_address: !!user && type === "delivery" && !savedAddrId && saveAddress,
         language: lang,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -135,6 +154,17 @@ export default function CheckoutScreen() {
           </View>
           <Field label={`${t("phone")} *`} value={f.phone} onChangeText={set("phone")} keyboardType="phone-pad" placeholder="079 123 45 67" testID="checkout-phone" />
           <Field label={t("email")} value={f.email} onChangeText={set("email")} keyboardType="email-address" autoCapitalize="none" testID="checkout-email" />
+          {type === "delivery" && user && user.addresses.length > 0 ? (
+            <View style={{ gap: 8 }}>
+              <Text style={styles.hint}>{t("useSavedAddress")}</Text>
+              <View style={styles.wrap}>
+                {user.addresses.map((a) => (
+                  <Chip key={a.id} label={a.label || `${a.street} ${a.number}`.trim()} selected={savedAddrId === a.id} onPress={() => pickSavedAddress(a.id)} testID={`checkout-saved-address-${a.id}`} />
+                ))}
+                <Chip label={t("newAddress")} selected={!savedAddrId} onPress={() => pickSavedAddress(null)} testID="checkout-new-address" />
+              </View>
+            </View>
+          ) : null}
           {type === "delivery" ? (
             <>
               <View style={styles.two}>
@@ -146,14 +176,23 @@ export default function CheckoutScreen() {
                 <Field label={`${t("city")} *`} value={f.city} onChangeText={set("city")} style={{ flex: 2 }} testID="checkout-city" />
               </View>
               <Field label={t("deliveryInstructions")} value={f.instructions} onChangeText={set("instructions")} multiline testID="checkout-instructions" />
+              {user && !savedAddrId ? (
+                <Pressable testID="checkout-save-address" onPress={() => setSaveAddress((v) => !v)} style={styles.checkRow}>
+                  <View style={[styles.checkbox, styles.checkboxNeutral, saveAddress && styles.checkboxOn]}>{saveAddress ? <Feather name="check" size={16} color={colors.onBrandPrimary} /> : null}</View>
+                  <Text style={styles.checkText}>{t("saveThisAddress")}</Text>
+                </Pressable>
+              ) : null}
             </>
           ) : null}
         </View>
 
-        {cart.hasAlcohol ? (
+        {cart.requiredAge ? (
           <Pressable testID="age-confirm-checkbox" onPress={() => setAgeOk((v) => !v)} style={styles.ageRow}>
             <View style={[styles.checkbox, ageOk && styles.checkboxOn]}>{ageOk ? <Feather name="check" size={16} color={colors.onBrandPrimary} /> : null}</View>
-            <Text style={styles.ageText}>{t("ageConfirm")}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.ageBadge} testID="age-required-label">{cart.requiredAge}+</Text>
+              <Text style={styles.ageText}>{t(cart.requiredAge === 18 ? "ageConfirm18" : "ageConfirm16")}</Text>
+            </View>
           </Pressable>
         ) : null}
 
@@ -214,6 +253,11 @@ const useStyles = makeStyles((colors) => ({
   slotText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "600", color: colors.onSurface },
   slotTextActive: { color: colors.onBrandPrimary },
   two: { flexDirection: "row", gap: 10 },
+  wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  checkRow: { flexDirection: "row", gap: 12, alignItems: "center", paddingVertical: 4 },
+  checkboxNeutral: { borderColor: colors.borderStrong },
+  checkText: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.onSurface, flex: 1 },
+  ageBadge: { fontFamily: FONT_DISPLAY, fontSize: 18, color: colors.warning, marginBottom: 2 },
   ageRow: { flexDirection: "row", gap: 12, alignItems: "center", backgroundColor: colors.warningSoft, borderRadius: 12, padding: 14 },
   checkbox: { width: 26, height: 26, borderRadius: 7, borderWidth: 2, borderColor: colors.warning, alignItems: "center", justifyContent: "center" },
   checkboxOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },

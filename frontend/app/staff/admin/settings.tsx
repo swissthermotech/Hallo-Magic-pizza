@@ -6,7 +6,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useMenu, useSaveSettings } from "@/src/api";
-import { Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
+import { Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast, VatPicker } from "@/src/components/ui";
 import type { Settings } from "@/src/types";
 
 const DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
@@ -59,8 +59,19 @@ export default function SettingsScreen() {
       <ScreenHeader title={t("settings")} testID="settings-title" />
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 120 }} bottomOffset={140}>
         <Field label="Restaurant" value={s.restaurant_name} onChangeText={(v) => setS({ ...s, restaurant_name: v })} testID="settings-name" />
+
+        <Text style={styles.section}>{t("fiscal")}</Text>
+        <Field label={t("businessName")} value={s.business_name} onChangeText={(v) => setS({ ...s, business_name: v })} testID="settings-business-name" />
+        <Field label={t("street")} value={s.street} onChangeText={(v) => setS({ ...s, street: v, address: `${v}, ${s.postal_code} ${s.city}` })} testID="settings-street" />
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Field label={t("postalCode")} value={s.postal_code} onChangeText={(v) => setS({ ...s, postal_code: v, address: `${s.street}, ${v} ${s.city}` })} style={{ flex: 1 }} testID="settings-postal-code" />
+          <Field label={t("city")} value={s.city} onChangeText={(v) => setS({ ...s, city: v, address: `${s.street}, ${s.postal_code} ${v}` })} style={{ flex: 2 }} testID="settings-city" />
+        </View>
         <Field label={t("phone")} value={s.phone} onChangeText={(v) => setS({ ...s, phone: v })} testID="settings-phone" />
-        <Field label={t("street")} value={s.address} onChangeText={(v) => setS({ ...s, address: v })} testID="settings-address" />
+        <Field label={t("vatNumber")} value={s.vat_number} onChangeText={(v) => setS({ ...s, vat_number: v })} testID="settings-vat-number" />
+        <VatPicker label={t("vatStandard")} value={s.vat_rate_standard} onChange={(v) => setS({ ...s, vat_rate_standard: v })} testID="settings-vat-standard" />
+        <VatPicker label={t("vatAlcohol")} value={s.vat_rate_alcohol} onChange={(v) => setS({ ...s, vat_rate_alcohol: v })} testID="settings-vat-alcohol" />
+        <VatPicker label={t("vatDelivery")} value={s.delivery_fee_vat_rate} onChange={(v) => setS({ ...s, delivery_fee_vat_rate: v })} testID="settings-vat-delivery" />
 
         <Text style={styles.section}>{t("settings")}</Text>
         <Row label={t("tempClosed")} k="temporarily_closed" testID="settings-closed" />

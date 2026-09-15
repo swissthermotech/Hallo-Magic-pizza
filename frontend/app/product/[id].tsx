@@ -9,7 +9,7 @@ import { Feather } from "@react-native-vector-icons/feather";
 import * as Haptics from "expo-haptics";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useMenu } from "@/src/api";
+import { imgUri, useMenu } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { chf } from "@/src/format";
 import { Badge, Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, Stepper, useToast } from "@/src/components/ui";
@@ -132,6 +132,7 @@ export default function ProductScreen() {
       extras,
       note: note.trim(),
       is_alcohol: product.is_alcohol,
+      alcohol_type: product.alcohol_type,
     };
     if (editing) cart.updateItem(editing.line_id, payload);
     else cart.addItem(payload);
@@ -162,14 +163,14 @@ export default function ProductScreen() {
     <View style={styles.screen}>
       <KeyboardAwareScrollView contentContainerStyle={{ paddingBottom: CTA_H + 16 }} bottomOffset={CTA_H + 16} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <Image source={{ uri: product.image_url || undefined }} style={styles.heroImg} contentFit="cover" transition={250} />
+          <Image source={{ uri: imgUri(product.image_url) }} style={styles.heroImg} contentFit="cover" transition={250} />
           <LinearGradient colors={[colors.scrimTransparent, colors.scrim]} style={styles.heroScrim} />
           <Pressable testID="product-close-button" onPress={() => router.back()} style={[styles.closeBtn, { top: insets.top + 8 }]} hitSlop={8}>
             <Feather name="x" size={20} color={colors.onSurface} />
           </Pressable>
           <View style={styles.heroText}>
             <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
-              {product.is_alcohol ? <Badge label="18+" tone="warning" /> : null}
+              {product.is_alcohol ? <Badge label={`${product.alcohol_type === "spirits" ? 18 : 16}+`} tone="warning" /> : null}
               {!product.available ? <Badge label={t("soldOut")} tone="error" /> : null}
             </View>
             <Text style={styles.name} testID="product-detail-name">{tx(product.name)}</Text>

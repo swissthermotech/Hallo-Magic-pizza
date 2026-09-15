@@ -9,14 +9,22 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.emergent.hallomagictest.jectz0"
+      "bundleIdentifier": "com.emergent.hallomagictest.jectz0",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Choose product photos for the menu",
+        "NSCameraUsageDescription": "Take product photos for the menu"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "package": "com.emergent.hallomagictest.jectz0"
+      "package": "com.emergent.hallomagictest.jectz0",
+      "permissions": [
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -40,7 +48,14 @@
       "expo-web-browser",
       "expo-status-bar",
       "@react-native-vector-icons/feather",
-      "expo-audio"
+      "expo-audio",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose product photos for the menu",
+          "cameraPermission": "Take product photos for the menu"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

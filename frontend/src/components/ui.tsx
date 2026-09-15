@@ -260,6 +260,30 @@ export function Badge({ label, tone = "neutral", testID }: { label: string; tone
   );
 }
 
+// ---------------------------------------------------------------------------
+// VAT rate picker (Swiss standard rates for this restaurant)
+// ---------------------------------------------------------------------------
+export const VAT_RATES = [2.6, 8.1];
+
+export function VatPicker({ label, value, onChange, testID }: { label: string; value: number | null | undefined; onChange: (v: number) => void; testID: string }) {
+  const { colors } = useTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <Text style={{ fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "600", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 }}>{label}</Text>
+      <View style={{ flexDirection: "row", gap: 8 }} testID={testID}>
+        {VAT_RATES.map((r) => {
+          const on = value === r;
+          return (
+            <Pressable key={r} testID={`${testID}-${String(r).replace(".", "")}`} onPress={() => onChange(r)} style={{ flex: 1, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: on ? colors.brandPrimary : colors.border, backgroundColor: on ? colors.brandSoft : colors.surfaceSecondary, alignItems: "center", justifyContent: "center" }}>
+              <Text style={{ fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: on ? colors.brandPrimary : colors.onSurface }}>{r.toFixed(1)} %</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 export function Empty({ icon, title, hint, action }: { icon: React.ComponentProps<typeof Feather>["name"]; title: string; hint?: string; action?: React.ReactNode }) {
   const { colors } = useTheme();
   return (

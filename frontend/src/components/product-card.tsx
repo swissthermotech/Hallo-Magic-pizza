@@ -8,6 +8,7 @@ import Animated, { FadeInUp } from "react-native-reanimated";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useCart } from "@/src/cart";
+import { imgUri } from "@/src/api";
 import { chf } from "@/src/format";
 import { FONT_DISPLAY, FONT_TEXT, useToast } from "./ui";
 import type { Product } from "@/src/types";
@@ -33,7 +34,7 @@ export function ProductCard({ product, onPress, index = 0 }: { product: Product;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     cart.addItem({
       product_id: product.id, name: product.name, image_url: product.image_url, unit_price: price, quantity: 1,
-      size: product.sizes[0] ?? null, options: [], removed_ingredients: [], extras: [], note: "", is_alcohol: product.is_alcohol,
+      size: product.sizes[0] ?? null, options: [], removed_ingredients: [], extras: [], note: "", is_alcohol: product.is_alcohol, alcohol_type: product.alcohol_type,
     });
     toast.show(`${tx(product.name)} – ${t("added")}`, "success");
   };
@@ -41,10 +42,10 @@ export function ProductCard({ product, onPress, index = 0 }: { product: Product;
   return (
     <Animated.View entering={FadeInUp.delay(Math.min(index, 6) * 50).duration(400)} style={styles.wrap}>
       <Pressable testID={`product-card-${product.id}`} onPress={onPress} style={({ pressed }) => [styles.imgWrap, pressed && { transform: [{ scale: 0.985 }] }]}>
-        <Image source={{ uri: product.image_url || undefined }} style={styles.img} contentFit="cover" transition={300} />
+        <Image source={{ uri: imgUri(product.image_url) }} style={styles.img} contentFit="cover" transition={300} />
         <LinearGradient colors={[colors.scrimTransparent, colors.scrim]} start={{ x: 0.5, y: 0.35 }} end={{ x: 0.5, y: 1 }} style={styles.scrim} />
         <View style={styles.topBadges}>
-          {product.is_alcohol ? <View style={styles.pillDark}><Text style={styles.pillDarkText}>18+</Text></View> : null}
+          {product.is_alcohol ? <View style={styles.pillDark}><Text style={styles.pillDarkText}>{product.alcohol_type === "spirits" ? "18+" : "16+"}</Text></View> : null}
           {product.customizable ? (
             <View style={styles.pillDark}>
               <Feather name="sliders" size={11} color={colors.onSurfaceInverse} />

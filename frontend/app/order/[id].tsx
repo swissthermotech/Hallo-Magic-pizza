@@ -86,6 +86,14 @@ export default function OrderScreen() {
             <Text style={styles.totalValue} testID="order-total">{chf(o.total)}</Text>
           </View>
           <Text style={styles.pay}>{o.payment_method === "pay_at_pickup" ? t("payAtPickup") : t("payAtDelivery")}</Text>
+          {o.vat_breakdown?.length ? (
+            <View style={styles.vatBox} testID="order-vat-breakdown">
+              <Text style={styles.vatTitle}>{t("vatIncluded")}</Text>
+              {o.vat_breakdown.map((g) => (
+                <Text key={g.rate} style={styles.vatLine}>{t("vat")} {g.rate.toFixed(1)}% · {t("vatBase")} {chf(g.net)} · {t("vat")} {chf(g.vat)}</Text>
+              ))}
+            </View>
+          ) : null}
         </View>
 
         {/* Delivery address */}
@@ -149,6 +157,9 @@ const useStyles = makeStyles((colors) => ({
   totalLabel: { fontFamily: FONT_DISPLAY, fontSize: 20, color: colors.onSurface },
   totalValue: { fontFamily: FONT_DISPLAY, fontSize: 22, color: colors.brandPrimary },
   pay: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.brandSecondary, fontWeight: "700" },
+  vatBox: { marginTop: 6, gap: 2 },
+  vatTitle: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
+  vatLine: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted },
   addr: { fontFamily: FONT_TEXT, fontSize: 15, color: colors.onSurface, lineHeight: 22 },
   notif: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
   notifDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.brandPrimary, marginTop: 6 },

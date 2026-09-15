@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useMenu, useSaveProduct } from "@/src/api";
+import { imgUri, useMenu, useSaveProduct } from "@/src/api";
 import { chf } from "@/src/format";
 import { Badge, Button, Chip, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
 
@@ -58,12 +58,14 @@ export default function AdminScreen() {
         <ScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: insets.bottom + 100 }}>
           {products.map((p) => (
             <Pressable key={p.id} testID={`admin-product-${p.id}`} onPress={() => router.push({ pathname: "/staff/admin/product/[id]", params: { id: p.id } })} style={[styles.row, !p.available && { opacity: 0.6 }]}>
-              <Image source={{ uri: p.image_url || undefined }} style={styles.thumb} contentFit="cover" />
+              <Image source={{ uri: imgUri(p.image_url) }} style={styles.thumb} contentFit="cover" />
               <View style={{ flex: 1 }}>
                 <Text style={styles.name} numberOfLines={1}>{p.name.fr}</Text>
                 <Text style={styles.sub} numberOfLines={1}>{p.name.de} · {p.sizes.length ? p.sizes.map((s) => `${s.label} ${s.price}` ).join(" / ") : chf(p.price)}</Text>
                 <View style={{ flexDirection: "row", gap: 6, marginTop: 4 }}>
                   <Badge label={p.available ? t("availableSwitch") : t("soldOutSwitch")} tone={p.available ? "success" : "error"} testID={`admin-availability-${p.id}`} />
+                  <Badge label={`${t("vat")} ${(p.vat_rate ?? (p.is_alcohol ? data?.settings.vat_rate_alcohol : data?.settings.vat_rate_standard) ?? 0).toFixed(1)}%`} tone="neutral" testID={`admin-vat-${p.id}`} />
+                  {p.is_alcohol ? <Badge label="18+" tone="warning" /> : null}
                   {p.customizable ? <Badge label={t("customize")} tone="neutral" /> : null}
                 </View>
               </View>

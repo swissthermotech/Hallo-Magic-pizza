@@ -1,8 +1,21 @@
 import { Platform } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Menu, Order, Product, Extra, Settings, OrderType, CartItem, Customer, Address } from "./types";
+import type { Menu, Order, Product, Extra, Settings, OrderType, CartItem, Customer, Address, User, SavedAddress } from "./types";
 
 const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
+
+/** Product photos are stored as API-relative urls ("/api/files/..."); external urls (placeholders) pass through. */
+export function imgUri(url?: string | null): string | undefined {
+  if (!url) return undefined;
+  return url.startsWith("/") ? `${process.env.EXPO_PUBLIC_BACKEND_URL}${url}` : url;
+}
+
+// Optional customer session – set by AuthProvider; guests simply have no token.
+let authToken: string | null = null;
+export const setAuthToken = (t: string | null) => {
+  authToken = t;
+};
+const authHeaders = (): Record<string, string> => (authToken ? { Authorization: `Bearer ${authToken}` } : {});
 
 export class ApiError extends Error {
   status: number;
@@ -15,7 +28,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(init?.headers || {}) },
   });
   if (!res.ok) {
     let detail = res.statusText;
@@ -77,6 +90,26 @@ export function useTicket(id: string | undefined) {
   });
 }
 
+export function useReceipt(id: string | undefined) {
+  return useQuery({
+    queryKey: ["receipt", id],
+    queryFn: () => api.get<{ text: string; printed: boolean; printed_at?: string; print_attempts: number; order_number: number }>(`/orders/${id}/receipt`),
+    enabled: !!id,
+  });
+}
+
+export function usePrintReceipt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, force }: { id: string; force?: boolean }) =>
+      api.post<{ printed: boolean; print_attempts: number; text: string }>(`/orders/${id}/receipt/print`, { force: !!force }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: ["receipt", v.id] });
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+  });
+}
+
 // ---- Mutations ----
 export interface PlaceOrderPayload {
   type: OrderType;
@@ -86,6 +119,7 @@ export interface PlaceOrderPayload {
   requested_time?: string;
   general_note?: string;
   age_confirmed: boolean;
+  save_address?: boolean;
   language: string;
 }
 
@@ -110,6 +144,7 @@ export function usePlaceOrder() {
         requested_time: p.requested_time,
         general_note: p.general_note,
         age_confirmed: p.age_confirmed,
+        save_address: !!p.save_address,
         language: p.language,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
@@ -173,4 +208,52 @@ export function useSaveSettings() {
     mutationFn: (body: Settings) => api.put<Settings>("/settings", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["menu"] }),
   });
+}
+
+// ---- Customer accounts (optional) ----
+export interface AuthResponse {
+  access_token: string;
+  user: User;
+}
+export const authApi = {
+  register: (body: { first_name: string; last_name: string; phone: string; email?: string; password: string }) => api.post<AuthResponse>("/auth/register", body),
+  login: (body: { phone: string; password: string }) => api.post<AuthResponse>("/auth/login", body),
+  me: () => api.get<User>("/auth/me"),
+  updateProfile: (body: { first_name: string; last_name: string; phone: string; email?: string }) => api.put<User>("/auth/me", body),
+  addAddress: (body: Omit<SavedAddress, "id">) => api.post<User>("/auth/me/addresses", body),
+  updateAddress: (id: string, body: Omit<SavedAddress, "id">) => api.put<User>(`/auth/me/addresses/${id}`, body),
+  deleteAddress: (id: string) => api.del<User>(`/auth/me/addresses/${id}`),
+};
+
+export function useMyAccountOrders(enabled: boolean) {
+  return useQuery({ queryKey: ["orders", "account"], queryFn: () => api.get<Order[]>("/me/orders"), enabled, refetchInterval: 8000 });
+}
+
+export function useCustomerSearch(phone: string) {
+  const q = phone.replace(/\D/g, "");
+  return useQuery({
+    queryKey: ["customers", q],
+    queryFn: () => api.get<{ accounts: User[]; orders: Order[] }>(`/customers/search?phone=${encodeURIComponent(q)}`),
+    enabled: q.length >= 3,
+  });
+}
+
+// ---- Product photo upload (admin) ----
+export async function uploadProductPhoto(uri: string, name = "photo.jpg", type = "image/jpeg"): Promise<{ url: string; path: string; size: number }> {
+  const form = new FormData();
+  if (Platform.OS === "web") {
+    const blob = await (await fetch(uri)).blob();
+    form.append("file", blob, name);
+  } else {
+    form.append("file", { uri, name, type } as any);
+  }
+  const res = await fetch(`${BASE}/uploads/product-photo`, { method: "POST", body: form, headers: authHeaders() });
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      detail = (await res.json()).detail ?? detail;
+    } catch {}
+    throw new ApiError(res.status, detail);
+  }
+  return res.json();
 }

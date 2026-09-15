@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
-import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useDeleteProduct, useMenu, useSaveProduct } from "@/src/api";
-import { Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
-import type { Product, ProductOption } from "@/src/types";
+import { Badge, Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast, VatPicker } from "@/src/components/ui";
+import { PhotoManager } from "@/src/components/photo-manager";
+import type { AlcoholType, Product, ProductOption } from "@/src/types";
 
 const DOUGH_TEMPLATE: ProductOption[] = [
   { key: "classic", group: "dough", name: { fr: "Pâte classique", de: "Klassischer Teig" }, price: 0, price_by_size: {}, only_sizes: [], default: true },
@@ -34,6 +34,9 @@ export default function ProductEditor() {
   const [available, setAvailable] = useState(true);
   const [customizable, setCustomizable] = useState(false);
   const [isAlcohol, setIsAlcohol] = useState(false);
+  const [alcoholType, setAlcoholType] = useState<AlcoholType>("fermented");
+  const [extraPhotos, setExtraPhotos] = useState<string[]>([]);
+  const [vatRate, setVatRate] = useState<number | null>(null);
   const [pizzaOptions, setPizzaOptions] = useState(false);
   const [allowed, setAllowed] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -51,6 +54,9 @@ export default function ProductEditor() {
       setAvailable(product.available);
       setCustomizable(product.customizable);
       setIsAlcohol(product.is_alcohol);
+      setAlcoholType(product.alcohol_type ?? "fermented");
+      setExtraPhotos(product.images ?? []);
+      setVatRate(product.vat_rate ?? null);
       setPizzaOptions(product.options.length > 0);
       setAllowed(product.allowed_extra_ids);
     } else if (isNew) {
@@ -83,6 +89,7 @@ export default function ProductEditor() {
       description: { fr: f.descFr.trim(), de: f.descDe.trim() || f.descFr.trim() },
       price,
       image_url: f.image.trim() || null,
+      images: extraPhotos,
       allergens: { fr: f.allergFr, de: f.allergDe },
       ingredients,
       sizes,
@@ -91,6 +98,8 @@ export default function ProductEditor() {
       allowed_extra_ids: customizable ? allowed : [],
       available,
       is_alcohol: isAlcohol,
+      alcohol_type: isAlcohol ? alcoholType : null,
+      vat_rate: vatRate ?? (isAlcohol ? data!.settings.vat_rate_alcohol : data!.settings.vat_rate_standard),
     };
     try {
       await save.mutateAsync({ id: isNew ? undefined : id, body });
@@ -119,7 +128,8 @@ export default function ProductEditor() {
     <View style={styles.screen}>
       <ScreenHeader title={isNew ? t("newProduct") : f.nameFr || t("edit")} testID="product-editor-title" />
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 120 }} bottomOffset={140}>
-        {f.image ? <Image source={{ uri: f.image }} style={styles.preview} contentFit="cover" /> : null}
+        <Text style={styles.section}>{t("photos")}</Text>
+        <PhotoManager main={f.image || null} extra={extraPhotos} onChange={(m, ex) => { set("image")(m || ""); setExtraPhotos(ex); }} />
         <Field label={t("photoUrl")} value={f.image} onChangeText={set("image")} autoCapitalize="none" testID="editor-image" />
 
         <Text style={styles.section}>{t("category")}</Text>
@@ -146,7 +156,18 @@ export default function ProductEditor() {
         <SwitchRow label={t("availableSwitch")} value={available} onChange={setAvailable} testID="editor-available" />
         <SwitchRow label={t("customize")} value={customizable} onChange={setCustomizable} testID="editor-customizable" />
         <SwitchRow label={`${t("dough")} / ${t("options")} (pizza)`} value={pizzaOptions} onChange={setPizzaOptions} testID="editor-pizza-options" />
-        <SwitchRow label="18+" value={isAlcohol} onChange={setIsAlcohol} testID="editor-alcohol" />
+        <SwitchRow label={t("alcoholProduct")} value={isAlcohol} onChange={(v) => { setIsAlcohol(v); if (vatRate === null || vatRate === (v ? data.settings.vat_rate_standard : data.settings.vat_rate_alcohol)) setVatRate(v ? data.settings.vat_rate_alcohol : data.settings.vat_rate_standard); }} testID="editor-alcohol" />
+        {isAlcohol ? (
+          <View style={{ gap: 8 }}>
+            <Text style={styles.switchLabel}>{t("alcoholType")}</Text>
+            <Chip label={t("alcoholFermented")} selected={alcoholType === "fermented"} onPress={() => setAlcoholType("fermented")} testID="editor-alcohol-fermented" />
+            <Chip label={t("alcoholSpirits")} selected={alcoholType === "spirits"} onPress={() => setAlcoholType("spirits")} testID="editor-alcohol-spirits" />
+            <Badge label={`${alcoholType === "spirits" ? 18 : 16}+ · ALCOOL`} tone="warning" testID="editor-alcohol-badge" />
+          </View>
+        ) : null}
+
+        <Text style={styles.section}>{t("vat")}</Text>
+        <VatPicker label={`${t("vatRate")} (${t("vatIncluded").toLowerCase()})`} value={vatRate ?? (isAlcohol ? data.settings.vat_rate_alcohol : data.settings.vat_rate_standard)} onChange={setVatRate} testID="editor-vat" />
 
         {customizable ? (
           <>
@@ -185,7 +206,6 @@ function SwitchRow({ label, value, onChange, testID }: { label: string; value: b
 const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
   center: { alignItems: "center", justifyContent: "center" },
-  preview: { width: "100%", height: 160, borderRadius: 16, backgroundColor: colors.surfaceTertiary },
   section: { fontFamily: FONT_DISPLAY, fontSize: 19, color: colors.onSurface, marginTop: 6 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   link: { fontFamily: FONT_TEXT, color: colors.brandPrimary, fontWeight: "700" },
