@@ -1,0 +1,198 @@
+{
+  "app_name": "Hallo Magic Pizza",
+  "personality": "1 iOS-Native Clean structure with 3 Editorial Mobile LIGHT typography and warmth",
+  "personality_one_liner": "A premium, appetizing, and fast Italian ordering experience balancing elegant editorial warmth with high-performance utility.",
+  "color": {
+    "surface": "#FDFBF7",
+    "onSurface": "#2B2521",
+    "surfaceSecondary": "#FFFFFF",
+    "onSurfaceSecondary": "#2B2521",
+    "surfaceTertiary": "#F2EAE1",
+    "onSurfaceTertiary": "#3E352F",
+    "surfaceInverse": "#2B2521",
+    "onSurfaceInverse": "#FDFBF7",
+    "brand": "#E63946",
+    "onBrand": "#FFFFFF",
+    "brandPrimary": "#E63946",
+    "onBrandPrimary": "#FFFFFF",
+    "brandSecondary": "#556B2F",
+    "onBrandSecondary": "#FFFFFF",
+    "brandTertiary": "#E2725B",
+    "onBrandTertiary": "#FFFFFF",
+    "success": "#556B2F",
+    "onSuccess": "#FFFFFF",
+    "warning": "#E2725B",
+    "onWarning": "#FFFFFF",
+    "error": "#D32F2F",
+    "onError": "#FFFFFF",
+    "info": "#8F7D70",
+    "onInfo": "#FFFFFF",
+    "border": "#EAE3D9",
+    "borderStrong": "#D4C9BD",
+    "divider": "#EAE3D9",
+    "muted": "#8F7D70"
+  },
+  "typography": {
+    "displayFontFamily": "Playfair Display",
+    "textFontFamily": "DM Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24
+    }
+  },
+  "spacing": {
+    "rule": "iOS-native comfortable vertical spacing. Generous padding around content. Empty space should feel like deliberate breathing room, not a broken layout.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": "1",
+  "navigation": "bottom_tabs",
+  "icon_set": "Feather",
+  "glassmorphism": {
+    "enabled": "true",
+    "do's": [
+      "Sticky headers over scrolling content",
+      "Bottom tab bar",
+      "Sticky CTA container at the bottom of the pizza customizer and checkout",
+      "Featured cards (when placed over images)"
+    ],
+    "dont's": [
+      "Input fields",
+      "Standard list rows",
+      "Dense data tables in the staff dashboard"
+    ]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Customer Menu (Home)",
+      "purpose": "Showcase the menu categories and appetizing items for quick ordering.",
+      "states": {
+        "loading": "Skeleton loaders for pizza cards, centered spinner for categories.",
+        "empty": "Illustration of an empty plate, 'Menu is loading...'",
+        "error": "Error message with 'Retry' button to fetch the menu."
+      },
+      "layout": "Full-bleed hero image of a wood-fired pizza with gradient scrim (top to bottom, to 70% surfaceInverse) and the title 'Hallo Magic Pizza'. Below: horizontally scrolling category chips (Pizzas, Pâtes, etc.). Below: vertical list of menu items. Each item uses a clean layout: high-quality image on the left or top, title in Playfair Display, description, and CHF price."
+    },
+    {
+      "name": "Product Detail (Customization)",
+      "purpose": "Allow the customer to customize their pizza with removals, extras, and notes.",
+      "states": {
+        "loading": "Spinner over the image, skeletons for options.",
+        "empty": "Product unavailable.",
+        "error": "Error loading product details."
+      },
+      "layout": "Large hero photo of the item, gradient scrim. Scrollable content: 'Remove Ingredients' as wrapping chips (brandTertiary), 'Add Extras' as a list with prices and +/-, and a 'Kitchen Note' text input. Fixed bottom container (glass or solid surface) with the live total price and a large primary CTA button to 'Add to Cart'."
+    },
+    {
+      "name": "Checkout",
+      "purpose": "Finalize the order details for pickup or delivery without online payment.",
+      "states": {
+        "loading": "Processing overlay.",
+        "empty": "Cart is empty with a 'Browse Menu' CTA.",
+        "error": "Failed to submit order."
+      },
+      "layout": "Segmented control at the top (Pickup vs Delivery). Form inputs for guest info (Name, Phone, Address if delivery). Order summary list. Fixed bottom CTA to 'Confirm Order (Pay at Pickup)'."
+    },
+    {
+      "name": "Order Tracker",
+      "purpose": "Visual timeline of the customer's active order status.",
+      "states": {
+        "loading": "Skeleton timeline.",
+        "empty": "No active orders. Suggest 'Order Now'.",
+        "error": "Failed to fetch order status."
+      },
+      "layout": "Large circular estimated time display prominently at the top. Below: vertical timeline (Confirmed, Preparing, Baking, Ready/Delivering). Active step highlighted in brandPrimary."
+    },
+    {
+      "name": "Staff Dashboard (Tablet)",
+      "purpose": "Unified management for incoming orders and quick decision-making.",
+      "states": {
+        "loading": "Skeleton cards.",
+        "empty": "No incoming orders right now.",
+        "error": "Sync error, retry connection."
+      },
+      "layout": "Two-column tablet layout. Left panel (30%): Scrollable queue of incoming order cards. Right panel (70%): Details of the selected order with oversized 'ACCEPTER' (success) and 'REFUSER' (error) buttons. Quick-select time chips (15, 20, 30, 40, 45, 60 min) and delay buttons (+5, +10) next to the accept button."
+    },
+    {
+      "name": "Kitchen Dashboard (KDS)",
+      "purpose": "Clear, high-visibility grid of active orders for the kitchen staff.",
+      "states": {
+        "loading": "Spinner.",
+        "empty": "Kitchen is clear. Great job!",
+        "error": "Connection error."
+      },
+      "layout": "Masonry or multi-column grid of active orders. Huge typography for items and customizations (extras in brandSecondary, removals in error color). Entire card is a large tap target to mark as 'Done'."
+    },
+    {
+      "name": "Ticket Preview",
+      "purpose": "Simulate an 80mm thermal receipt for printing.",
+      "states": {
+        "loading": "Generating ticket...",
+        "empty": "No ticket available.",
+        "error": "Error rendering ticket."
+      },
+      "layout": "Brutalist layout. Off-white background, mono typography (Courier or Space Mono), centered text, dashed lines for separators. High contrast for readability."
+    }
+  ],
+  "images": {
+    "hero_pizza": {
+      "url": "https://images.unsplash.com/photo-1579751626657-72bc17010498?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODh8MHwxfHNlYXJjaHwyfHxhdXRoZW50aWMlMjBpdGFsaWFuJTIwbWFyZ2hlcml0YSUyMHBpenphJTIwd29vZCUyMGZpcmVkfGVufDB8fHx8MTc4ODY4NDg3NXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Authentic wood-fired Margherita pizza"
+    },
+    "hero_pasta": {
+      "url": "https://images.unsplash.com/photo-1498579150354-977475b7ea0b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxmcmVzaCUyMGl0YWxpYW4lMjBwYXN0YSUyMGRpc2glMjByZXN0YXVyYW50fGVufDB8fHx8MTc4ODY5MTkxM3ww&ixlib=rb-4.1.0&q=85",
+      "alt": "Fresh Italian pasta with cherry tomatoes"
+    }
+  },
+  "haptics": {
+    "events": {
+      "add_to_cart": "selection",
+      "increase_quantity": "light",
+      "decrease_quantity": "light",
+      "toggle_ingredient": "light",
+      "switch_category": "selection",
+      "confirm_order": "success",
+      "accept_order_staff": "success",
+      "refuse_order_staff": "error",
+      "kitchen_mark_done": "medium"
+    }
+  },
+  "instructions_to_main_agent": [
+    "Implement bilingual support (French default, German) for the customer app.",
+    "Both customer and staff workflows exist in the same app; provide a clear entry routing point or dev toggle to switch between Customer Mode and Staff Mode.",
+    "Customer Menu: Implement horizontal scroll for categories and a vertical scroll for items.",
+    "Pizza Customizer: Must support removing standard ingredients and adding extras with LIVE price updates reflected in the sticky bottom CTA.",
+    "Checkout: No online payment. Implement segmented control for Pickup vs Delivery, and capture guest info.",
+    "Staff Dashboard: MUST use a responsive 2-column layout for tablets. The right pane needs massive 'ACCEPTER/REFUSER' buttons and quick-time pickers.",
+    "Kitchen Dashboard: Maximize legibility with large text. Show added extras prominently and highlight removed ingredients (e.g., strike-through or red text).",
+    "Ticket Preview: Use a Monospace font to simulate an 80mm thermal printer output.",
+    "Currency formatting: Use CHF (e.g., 'CHF 15.00').",
+    "Any image with text on it (like the Home Hero or Product Detail Hero) MUST use a top-to-bottom gradient scrim (transparent to 70% surfaceInverse) to ensure text contrast."
+  ]
+}

@@ -1,0 +1,75 @@
+import React, { useState } from "react";
+import { Pressable, Switch, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { Feather } from "@react-native-vector-icons/feather";
+import { makeStyles, useTheme } from "@/src/theme";
+import { useI18n } from "@/src/i18n";
+import { useMenu, useSaveExtra } from "@/src/api";
+import { chf } from "@/src/format";
+import { Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
+import type { Extra } from "@/src/types";
+
+export default function ExtrasScreen() {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const { t } = useI18n();
+  const toast = useToast();
+  const { data } = useMenu(0);
+  const save = useSaveExtra();
+  const [edit, setEdit] = useState<Partial<Extra> | null>(null);
+
+  const submit = async () => {
+    if (!edit?.name?.fr || edit.price === undefined) return toast.show(t("required"), "error");
+    const key = edit.key || edit.name.fr.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    try {
+      await save.mutateAsync({ id: edit.id, body: { key, name: { fr: edit.name.fr, de: edit.name.de || edit.name.fr }, price: Number(edit.price) || 0, available: edit.available ?? true, max_quantity: edit.max_quantity ?? 1 } });
+      toast.show(t("saved"), "success");
+      setEdit(null);
+    } catch (e: any) {
+      toast.show(e.message, "error");
+    }
+  };
+
+  return (
+    <View style={styles.screen}>
+      <ScreenHeader title={t("extrasAdmin")} subtitle={`${data?.extras.length ?? 0}`} testID="extras-title" right={<Pressable testID="extras-new" onPress={() => setEdit({ name: { fr: "", de: "" }, price: 2, available: true, max_quantity: 1 })} style={styles.iconBtn}><Feather name="plus" size={20} color={colors.onBrandPrimary} /></Pressable>} />
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: insets.bottom + 24 }} bottomOffset={40}>
+        {edit ? (
+          <View style={styles.editor} testID="extra-editor">
+            <Field label={t("nameFr")} value={edit.name?.fr ?? ""} onChangeText={(v) => setEdit({ ...edit, name: { fr: v, de: edit.name?.de ?? "" } })} testID="extra-name-fr" />
+            <Field label={t("nameDe")} value={edit.name?.de ?? ""} onChangeText={(v) => setEdit({ ...edit, name: { fr: edit.name?.fr ?? "", de: v } })} testID="extra-name-de" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Field label={`${t("price")} (CHF)`} value={String(edit.price ?? "")} onChangeText={(v) => setEdit({ ...edit, price: parseFloat(v.replace(",", ".")) || 0 })} keyboardType="decimal-pad" style={{ flex: 1 }} testID="extra-price" />
+              <Field label="Max" value={String(edit.max_quantity ?? 1)} onChangeText={(v) => setEdit({ ...edit, max_quantity: parseInt(v, 10) || 1 })} keyboardType="number-pad" style={{ flex: 1 }} testID="extra-max" />
+            </View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Button title={t("close")} variant="outline" onPress={() => setEdit(null)} style={{ flex: 1 }} testID="extra-cancel" />
+              <Button title={t("save")} loading={save.isPending} onPress={submit} style={{ flex: 2 }} testID="extra-save" />
+            </View>
+          </View>
+        ) : null}
+        {(data?.extras ?? []).map((e) => (
+          <Pressable key={e.id} testID={`extra-item-${e.key}`} onPress={() => setEdit(e)} style={[styles.row, !e.available && { opacity: 0.55 }]}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.name}>{e.name.fr} <Text style={styles.de}>· {e.name.de}</Text></Text>
+              <Text style={styles.sub}>{chf(e.price)} · max {e.max_quantity}</Text>
+            </View>
+            <Switch testID={`extra-toggle-${e.key}`} value={e.available} onValueChange={(v) => { save.mutateAsync({ id: e.id, body: { key: e.key, name: e.name, price: e.price, available: v, max_quantity: e.max_quantity } }).catch((err) => toast.show(err.message, "error")); }} trackColor={{ true: colors.success, false: colors.borderStrong }} thumbColor={colors.surfaceSecondary} />
+          </Pressable>
+        ))}
+      </KeyboardAwareScrollView>
+    </View>
+  );
+}
+
+const useStyles = makeStyles((colors) => ({
+  screen: { flex: 1, backgroundColor: colors.surface },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.brandPrimary, alignItems: "center", justifyContent: "center" },
+  editor: { backgroundColor: colors.surfaceTertiary, borderRadius: 16, padding: 14, gap: 12 },
+  row: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.surfaceSecondary, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14 },
+  name: { fontFamily: FONT_DISPLAY, fontSize: 17, color: colors.onSurface },
+  de: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },
+  sub: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted, marginTop: 2 },
+}));
