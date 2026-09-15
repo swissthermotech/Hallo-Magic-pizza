@@ -71,6 +71,14 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
     }
   };
   const validTime = /^\d{1,2}:\d{2}$/.test(customTime.trim());
+  const openTicket = () => {
+    const go = () => router.push({ pathname: "/staff/ticket/[id]", params: { id: o.id } });
+    if (onClose) {
+      // Detail is shown inside a Modal on phones: close it first, otherwise the ticket screen opens hidden behind it.
+      onClose();
+      setTimeout(go, 350);
+    } else go();
+  };
   const requested = o.requested_time && o.requested_time !== "asap" ? o.requested_time : null;
   const pending = o.status === "pending";
   const closed = o.status === "completed" || o.status === "cancelled";
@@ -197,7 +205,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
           </Text>
         </View>
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-          <Button title={t("ticketPreview")} variant="outline" icon="file-text" onPress={() => router.push({ pathname: "/staff/ticket/[id]", params: { id: o.id } })} style={{ flex: 1 }} testID="staff-ticket-preview" />
+          <Button title={t("ticketPreview")} variant="outline" icon="file-text" onPress={openTicket} style={{ flex: 1 }} testID="staff-ticket-preview" />
           <Button
             title={o.printed ? t("reprintTicket") : t("printTicket")}
             variant="secondary"

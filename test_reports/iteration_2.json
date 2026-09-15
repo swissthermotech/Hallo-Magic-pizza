@@ -1,0 +1,27 @@
+{
+  "summary": "Verified the ticket preview navigation bug fix on /staff. Mobile (390x844) and tablet (1200x800) flows both pass: staff-ticket-preview button now correctly navigates to /staff/ticket/{id}. On phone width the detail modal closes first (setTimeout 350ms) then navigates; on tablet two-column layout it navigates directly. Ticket screen renders paper with 'HALLO MAGIC PIZZA' and 'COMMANDE #<n>'. Reprint button increments ticket-print-status counter (Imprime 2x -> 3x). Direct URL /staff/ticket/{id} loads correctly when unlocked. Header back button returns to dashboard.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' emitted on staff/ticket screens. Non-blocking. Reference: /app/frontend/app/staff/ticket/[id].tsx:51 (paper style uses shadowColor/shadowOpacity/shadowRadius/shadowOffset)."},
+      {"component": "props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' triggered during reprint action (likely from a Button loading state). Non-blocking."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional cleanup (not blocking): migrate shadow* style props to boxShadow in the ticket paper style (/app/frontend/app/staff/ticket/[id].tsx paper style) and any pointerEvents usage to style.pointerEvents to silence RN Web deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "openTicket() in /app/frontend/src/components/staff-order.tsx (lines 74-81) correctly branches on presence of onClose (Modal on phone vs. two-column on tablet) and uses a 350ms delay before router.push - matches the bug fix and works as expected in tests."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "seed_data_creation": "None (used existing order #106 accepted/delivery). No test data created.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Ticket preview navigation from /staff to /staff/ticket/{id} verified on 390x844 and 1200x800. testIDs used: staff-pin-input, staff-pin-submit, staff-dashboard-title, staff-filter-progress, staff-order-card-{id}, staff-order-detail, staff-ticket-preview, ticket-paper, ticket-text, ticket-print-status, ticket-print-button, ticket-reprint-button, header-back-button. On phones the button lives at the bottom of a RN ScrollView inside a Modal - use el.scrollIntoView or scroll the ancestor ScrollView container (Playwright's built-in scroll_into_view_if_needed may report 'outside of viewport' because RN Web uses translate transforms).",
+  "rca_of_issue": "Original bug: on phone (<900px), OrderDetail is rendered inside a React Native <Modal>. Previously the ticket-preview button called router.push while the modal was still visible, so the ticket screen mounted behind the modal and appeared as a no-op. Fix in /app/frontend/src/components/staff-order.tsx openTicket(): when onClose (i.e. rendered in the phone modal) is provided, it first calls onClose() and defers router.push by 350ms so the modal fully dismisses before navigation; otherwise it navigates directly. Confirmed working in both viewports."
+}
