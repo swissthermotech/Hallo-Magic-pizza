@@ -164,9 +164,9 @@ class TestPhoneOrderCreate:
         assert o["estimated_minutes"] == 30
         # ticket contents
         t = s.get(f"{API}/orders/{o['id']}/ticket").json()["text"]
-        assert "RETRAIT" in t
+        assert "R E T R A I T" in t
         assert "TELEPHONE - POSTE" in t
-        assert "PAIEMENT AU RETRAIT" in t
+        assert "A ENCAISSER" in t
         STATE["pickup_paypickup_id"] = o["id"]
 
     def test_delivery_exact_time_1945(self, s):
@@ -188,8 +188,8 @@ class TestPhoneOrderCreate:
         o = r.json()
         assert o["requested_time"] == "19:45"
         t = s.get(f"{API}/orders/{o['id']}/ticket").json()["text"]
-        assert "LIVRAISON VERS 19:45" in t, t
-        assert "SOUHAITE: 19:45" in t, t
+        assert "LIVRAISON 19:45" in t, t
+        assert "Souhaite: 19:45" in t, t
 
     def test_pizza_extras_removed_note(self, s):
         m = _menu(s)

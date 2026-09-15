@@ -22,7 +22,7 @@ export default function StaffDashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t } = useI18n();
-  const { lock } = useStaff();
+  const { lock, role, label } = useStaff();
   const { width } = useWindowDimensions();
   const twoCol = width >= 900;
   const { data, isLoading } = useActiveOrders(3000);
@@ -75,7 +75,7 @@ export default function StaffDashboard() {
         <Pressable testID="staff-back" onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} style={styles.iconBtn}><Feather name="arrow-left" size={20} color={colors.onSurface} /></Pressable>
         <View style={{ flex: 1 }}>
           <Text style={styles.title} testID="staff-dashboard-title" numberOfLines={1}>{t("dashboard")}</Text>
-          <Text style={styles.subtitle} numberOfLines={1}>iPhone · Android · Web</Text>
+          <Text style={styles.subtitle} numberOfLines={1}>{label} · iPhone · Android · Web · Téléphone</Text>
         </View>
         <Pressable testID="staff-sound-toggle" onPress={() => setSoundOn((v) => !v)} style={[styles.iconBtn, soundOn && styles.iconBtnOn]}>
           <Feather name={soundOn ? "volume-2" : "volume-x"} size={20} color={soundOn ? colors.onBrandPrimary : colors.onSurface} />
@@ -83,7 +83,8 @@ export default function StaffDashboard() {
         <Pressable testID="staff-go-kitchen" onPress={() => router.push("/staff/kitchen")} style={styles.iconBtn}><Feather name="coffee" size={20} color={colors.onSurface} /></Pressable>
         <Pressable testID="staff-go-phone-orders" onPress={() => router.push("/phone-orders")} style={styles.iconBtn}><Feather name="phone" size={20} color={colors.onSurface} /></Pressable>
         <Pressable testID="staff-go-customers" onPress={() => router.push("/staff/customers")} style={styles.iconBtn}><Feather name="users" size={20} color={colors.onSurface} /></Pressable>
-        <Pressable testID="staff-go-admin" onPress={() => router.push("/staff/admin")} style={styles.iconBtn}><Feather name="settings" size={20} color={colors.onSurface} /></Pressable>
+        {role === "manager" ? <Pressable testID="staff-go-closing" onPress={() => router.push("/staff/closing")} style={styles.iconBtn}><Feather name="bar-chart-2" size={20} color={colors.onSurface} /></Pressable> : null}
+        {role === "manager" ? <Pressable testID="staff-go-admin" onPress={() => router.push("/staff/admin")} style={styles.iconBtn}><Feather name="settings" size={20} color={colors.onSurface} /></Pressable> : null}
         <Pressable testID="staff-lock" onPress={() => { lock(); router.replace("/(tabs)/more"); }} style={styles.iconBtn}><Feather name="lock" size={18} color={colors.onSurface} /></Pressable>
       </View>
 

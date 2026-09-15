@@ -31,7 +31,7 @@ export default function PhoneOrdersScreen() {
   const router = useRouter();
   const { t, lang } = useI18n();
   const toast = useToast();
-  const { ready, unlocked } = useStaff();
+  const { ready, unlocked, role } = useStaff();
   const { width } = useWindowDimensions();
   const wide = width >= 900;
   const { data } = useMenu();
@@ -62,6 +62,7 @@ export default function PhoneOrdersScreen() {
   const [payment, setPayment] = useState<PaymentMethod>("cash");
   const [pane, setPane] = useState<"entry" | "order">("entry");
   const [done, setDone] = useState<Order | null>(null);
+  const [requestId, setRequestId] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
 
   const reset = () => {
     cart.clear();
@@ -73,10 +74,11 @@ export default function PhoneOrdersScreen() {
     setPayment("cash");
     setDone(null);
     setPane("entry");
+    setRequestId(`${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
   };
 
   const confirm = async () => {
-    if (!customer || !station) return;
+    if (!customer || !station || place.isPending) return;
     const delivery = cart.orderType === "delivery";
     try {
       const order = await place.mutateAsync({
@@ -84,6 +86,7 @@ export default function PhoneOrdersScreen() {
         station,
         payment_method: payment,
         customer_id: customer.id,
+        client_request_id: `${station}-${requestId}`,
         items: cart.items,
         customer: { first_name: customer.first_name, last_name: customer.last_name, phone: customer.phone, email: customer.email || undefined },
         address: delivery ? { street: address.street.trim(), number: address.number.trim(), npa: address.npa.trim(), city: address.city.trim(), instructions: address.instructions.trim() || undefined } : undefined,
@@ -103,6 +106,7 @@ export default function PhoneOrdersScreen() {
 
   if (!ready || !stationReady) return <View style={[styles.screen, styles.center]}><ActivityIndicator color={colors.brandPrimary} /></View>;
   if (!unlocked) return <Redirect href="/staff/login" />;
+  if (role && !["manager", "phone"].includes(role)) return <Redirect href={role.startsWith("driver") ? "/driver" : "/staff"} />;
 
   const entry = (
     <View style={{ gap: 18 }}>

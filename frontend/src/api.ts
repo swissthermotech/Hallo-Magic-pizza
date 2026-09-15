@@ -15,7 +15,17 @@ let authToken: string | null = null;
 export const setAuthToken = (t: string | null) => {
   authToken = t;
 };
-const authHeaders = (): Record<string, string> => (authToken ? { Authorization: `Bearer ${authToken}` } : {});
+let staffToken: string | null = null;
+export const setStaffToken = (t: string | null) => {
+  staffToken = t;
+};
+const CUSTOMER_PATHS = ["/auth/register", "/auth/login", "/auth/me", "/me/orders"];
+/** Staff devices send the staff role token; customer-account endpoints and customer checkout use the customer token. */
+const authHeaders = (path = ""): Record<string, string> => {
+  const customer = CUSTOMER_PATHS.some((p) => path.startsWith(p)) || path === "/orders";
+  const tok = customer ? authToken : staffToken || authToken;
+  return tok ? { Authorization: `Bearer ${tok}` } : {};
+};
 
 export class ApiError extends Error {
   status: number;
@@ -28,7 +38,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...authHeaders(), ...(init?.headers || {}) },
+    headers: { "Content-Type": "application/json", ...authHeaders(path), ...(init?.headers || {}) },
   });
   if (!res.ok) {
     let detail = res.statusText;
@@ -85,7 +95,7 @@ export function useActiveOrders(pollMs = 3000) {
 export function useTicket(id: string | undefined) {
   return useQuery({
     queryKey: ["ticket", id],
-    queryFn: () => api.get<{ text: string; printed: boolean; printed_at?: string; print_attempts: number; order_number: number }>(`/orders/${id}/ticket`),
+    queryFn: () => api.get<{ text: string; printed: boolean; printed_at?: string; print_attempts: number; order_number: number; print_status?: string | null; last_print_error?: string | null; printnode_job_id?: string | null; qr?: string | null; printer_configured: boolean }>(`/orders/${id}/ticket`),
     enabled: !!id,
   });
 }
@@ -243,6 +253,7 @@ export interface PhoneOrderPayload extends PlaceOrderPayload {
   station: number;
   payment_method: string;
   customer_id?: string | null;
+  client_request_id?: string;
 }
 export function usePlacePhoneOrder() {
   const qc = useQueryClient();
@@ -254,6 +265,7 @@ export function usePlacePhoneOrder() {
         station: p.station,
         payment_method: p.payment_method,
         customer_id: p.customer_id ?? null,
+        client_request_id: p.client_request_id,
         items: p.items.map((i) => ({
           product_id: i.product_id,
           quantity: i.quantity,
@@ -308,3 +320,40 @@ export async function uploadProductPhoto(uri: string, name = "photo.jpg", type =
   }
   return res.json();
 }
+
+// ---- Driver ----
+export function useDriverOrders() {
+  return useQuery({ queryKey: ["orders", "driver"], queryFn: () => api.get<Order[]>("/driver/orders"), refetchInterval: 5000 });
+}
+export function useDriverAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action, body }: { id: string; action: "pickup" | "depart" | "delivered" | "collect"; body?: object }) => api.post<Order>(`/driver/orders/${id}/${action}`, body ?? {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+  });
+}
+
+// ---- Manager reports ----
+export interface DriverClosing {
+  driver: string; date: string; deliveries: number; cancelled: number;
+  orders: { id: string; order_number: number; total: number; collection_method: string; payment_collected: boolean; delivered_at?: string | null; status: string; city: string }[];
+  cash_expected: number; terminal_expected: number; paid_no_collection: number; total: number;
+  actual_cash?: number | null; actual_terminal?: number | null; cash_difference?: number | null; terminal_difference?: number | null; closed_at?: string | null;
+}
+export function useClosing(date: string) {
+  return useQuery({ queryKey: ["closing", date], queryFn: () => api.get<{ date: string; drivers: DriverClosing[] }>(`/reports/closing?date=${date}`), refetchInterval: 10000 });
+}
+export function useSources(date: string) {
+  return useQuery({ queryKey: ["sources", date], queryFn: () => api.get<{ date: string; sources: { source: string; count: number; total: number }[]; total_count: number; total: number }>(`/reports/sources?date=${date}`), refetchInterval: 10000 });
+}
+export function useSaveClosing() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { date: string; driver: string; actual_cash?: number | null; actual_terminal?: number | null }) => api.post("/reports/closing", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["closing"] }),
+  });
+}
+export const staffPins = {
+  roles: () => api.get<{ role: string; label: string }[]>("/auth/staff/roles"),
+  change: (role: string, pin: string) => api.put("/auth/staff/pins", { role, pin }),
+};

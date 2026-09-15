@@ -220,6 +220,17 @@ export interface Order {
   user_id?: string | null;
   station?: number | null;
   driver?: string | null;
+  assigned_at?: string | null;
+  picked_up_at?: string | null;
+  out_for_delivery_at?: string | null;
+  delivered_at?: string | null;
+  ready_at?: string | null;
+  collection_method?: string | null;
+  amount_due: number;
+  payment_collected: boolean;
+  collected_at?: string | null;
+  printnode_job_id?: string | null;
+  last_print_error?: string | null;
   subtotal: number;
   extras_total: number;
   delivery_fee: number;

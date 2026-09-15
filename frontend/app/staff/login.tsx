@@ -7,7 +7,7 @@ import { Feather } from "@react-native-vector-icons/feather";
 import * as Haptics from "expo-haptics";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useStaff } from "@/src/staff-auth";
+import { homeFor, useStaff } from "@/src/staff-auth";
 import { Button, FONT_DISPLAY, FONT_TEXT, ScreenHeader } from "@/src/components/ui";
 
 export default function StaffLogin() {
@@ -20,10 +20,11 @@ export default function StaffLogin() {
   const [pin, setPin] = useState("");
   const [error, setError] = useState(false);
 
-  const submit = () => {
-    if (unlock(pin)) {
+  const submit = async () => {
+    const role = await unlock(pin);
+    if (role) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      router.replace("/staff");
+      router.replace(homeFor(role));
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
       setError(true);

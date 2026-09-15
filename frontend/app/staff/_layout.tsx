@@ -2,10 +2,10 @@ import React from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Redirect, Stack, usePathname } from "expo-router";
 import { themes } from "@/src/theme";
-import { useStaff } from "@/src/staff-auth";
+import { homeFor, useStaff } from "@/src/staff-auth";
 
 export default function StaffLayout() {
-  const { ready, unlocked } = useStaff();
+  const { ready, unlocked, role } = useStaff();
   const pathname = usePathname();
   const isLogin = pathname.startsWith("/staff/login");
 
@@ -17,7 +17,11 @@ export default function StaffLayout() {
     );
   }
   if (!unlocked && !isLogin) return <Redirect href="/staff/login" />;
-  if (unlocked && isLogin) return <Redirect href="/staff" />;
+  if (unlocked && isLogin) return <Redirect href={homeFor(role!)} />;
+  // Role boundaries: drivers only see /driver, phone role only /phone-orders, admin & closing are manager-only
+  if (unlocked && role && role.startsWith("driver")) return <Redirect href="/driver" />;
+  if (unlocked && role === "phone") return <Redirect href="/phone-orders" />;
+  if (unlocked && role !== "manager" && (pathname.startsWith("/staff/admin") || pathname.startsWith("/staff/closing"))) return <Redirect href="/staff" />;
 
   return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themes.light.surface } }} />;
 }

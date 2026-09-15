@@ -6,6 +6,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { usePrintTicket, useTicket } from "@/src/api";
 import { fmtTime } from "@/src/format";
+import QRCode from "react-native-qrcode-svg";
 import { Badge, Button, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
 
 export default function TicketScreen() {
@@ -30,8 +31,22 @@ export default function TicketScreen() {
         <ScrollView contentContainerStyle={{ padding: 20, alignItems: "center", paddingBottom: insets.bottom + 120 }}>
           <View style={styles.paper} testID="ticket-paper">
             <Text style={styles.mono} testID="ticket-text">{data.text}</Text>
+            {data.qr ? (
+              <View style={{ alignItems: "center", gap: 6, marginTop: 6 }} testID="ticket-qr">
+                <QRCode value={`${process.env.EXPO_PUBLIC_BACKEND_URL}${data.qr}`} size={120} backgroundColor="transparent" />
+                <Text style={[styles.meta, { marginTop: 0, textAlign: "center" }]}>{t("qrHint")}</Text>
+              </View>
+            ) : null}
             <View style={styles.tear} />
           </View>
+          {data.print_status === "failed" ? (
+            <View style={styles.failed} testID="ticket-print-failed">
+              <Text style={styles.failedText}>⚠ {t("printFailed")}{data.last_print_error ? ` · ${data.last_print_error}` : ""}</Text>
+              <Button title={t("retryPrint")} icon="refresh-cw" variant="danger" onPress={() => doPrint(true)} loading={print.isPending} testID="ticket-retry-button" />
+            </View>
+          ) : null}
+          {!data.printer_configured ? <Text style={styles.meta}>{t("printerSimulated")}</Text> : null}
+          {data.printnode_job_id ? <Text style={styles.meta}>PrintNode job: {data.printnode_job_id}</Text> : null}
           <Text style={styles.meta}>{data.printed ? `${t("printed")}: ${fmtTime(data.printed_at)} · ${data.print_attempts} ${t("printTicket").toLowerCase()}` : t("notPrinted")}</Text>
         </ScrollView>
       )}
@@ -52,5 +67,7 @@ const useStyles = makeStyles((colors) => ({
   mono: { fontFamily: Platform.select({ ios: "Courier New", android: "monospace", default: "Courier New, monospace" }), fontSize: 12.5, lineHeight: 17, color: colors.onSurface },
   tear: { height: 1, borderTopWidth: 2, borderStyle: "dashed", borderColor: colors.borderStrong, marginTop: 12 },
   meta: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted, marginTop: 14 },
+  failed: { width: 302, marginTop: 14, backgroundColor: colors.error, borderRadius: 14, padding: 12, gap: 10 },
+  failedText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "800", color: colors.onError },
   cta: { position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", gap: 10, paddingHorizontal: 16, paddingTop: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
 }));

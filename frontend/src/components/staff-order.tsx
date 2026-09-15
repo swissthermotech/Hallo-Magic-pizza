@@ -257,13 +257,13 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <Feather name="printer" size={18} color={o.printed ? colors.success : colors.muted} />
           <Text style={[styles.boxText, { flex: 1 }]} testID="staff-print-status">
-            {o.printed ? `${t("printed")} ${fmtTime(o.printed_at)} · ${o.print_attempts}x${o.print_status ? ` · ${o.print_status}` : ""}` : t("notPrinted")}
+            {o.print_status === "failed" ? `⚠ ${t("printFailed")} · ${o.print_attempts}x` : o.printed ? `${t("printed")} ${fmtTime(o.printed_at)} · ${o.print_attempts}x${o.print_status ? ` · ${o.print_status}` : ""}` : t("notPrinted")}
           </Text>
         </View>
         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
           <Button title={t("ticketPreview")} variant="outline" icon="file-text" onPress={openTicket} style={{ flex: 1 }} testID="staff-ticket-preview" />
           <Button
-            title={o.printed ? t("reprintTicket") : t("printTicket")}
+            title={o.print_status === "failed" ? t("retryPrint") : o.printed ? t("reprintTicket") : t("printTicket")}
             variant="secondary"
             icon="printer"
             loading={print.isPending}
