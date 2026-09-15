@@ -71,6 +71,20 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
     }
   };
   const validTime = /^\d{1,2}:\d{2}$/.test(customTime.trim());
+
+  // 2-step acceptance: step 1 selects a time (nothing is sent), step 2 "ACCEPTER ET CONFIRMER" accepts.
+  type Sel = { minutes?: number; time?: string };
+  const [sel, setSel] = useState<Sel | null>(null);
+  const pick = (s: Sel) => {
+    Haptics.selectionAsync().catch(() => {});
+    setSel(s);
+  };
+  const isSel = (s: Sel) => !!sel && sel.minutes === s.minutes && sel.time === s.time;
+  const selTime = sel?.time
+    ? sel.time
+    : sel?.minutes !== undefined
+      ? new Date(Date.now() + sel.minutes * 60000).toLocaleTimeString("fr-CH", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Zurich" })
+      : "";
   const openTicket = () => {
     const go = () => router.push({ pathname: "/staff/ticket/[id]", params: { id: o.id } });
     if (onClose) {
@@ -146,13 +160,16 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
       {/* Actions */}
       {pending ? (
         <View style={{ gap: 12 }}>
+          <Text style={styles.actionLabel}>1 · {requested ? `${t("confirm")} ${requested} / ${t("changeTo")}` : t("estimatedPrep")}</Text>
           {requested ? (
-            <Button title={`${t("confirm")} ${requested}`} size="xl" icon="check-circle" variant="success" loading={action.isPending} onPress={() => run("accept", { time: requested })} testID="staff-confirm-requested-time" />
+            <Pressable testID="staff-confirm-requested-time" onPress={() => pick({ time: requested })} style={[styles.minuteBtn, { width: "100%", flexDirection: "row", gap: 10 }, isSel({ time: requested }) && styles.minuteBtnSel]}>
+              <Feather name="check-circle" size={22} color={colors.onSurfaceInverse} />
+              <Text style={styles.minuteText}>{t("confirm")} {requested}</Text>
+            </Pressable>
           ) : null}
-          <Text style={styles.actionLabel}>{requested ? t("changeTo") : t("estimatedPrep")}</Text>
           <View style={styles.minuteGrid}>
             {QUICK_MINUTES.map((m) => (
-              <Pressable key={m} testID={`staff-accept-${m}`} disabled={action.isPending} onPress={() => run("accept", { minutes: m })} style={styles.minuteBtn}>
+              <Pressable key={m} testID={`staff-accept-${m}`} onPress={() => pick({ minutes: m })} style={[styles.minuteBtn, isSel({ minutes: m }) && styles.minuteBtnSel]}>
                 <Text style={styles.minuteText}>{m}</Text>
                 <Text style={styles.minuteUnit}>min</Text>
               </Pressable>
@@ -160,10 +177,22 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
           </View>
           <View style={styles.customRow}>
             <TextInput testID="staff-custom-time-input" value={customTime} onChangeText={setCustomTime} placeholder="19:45" placeholderTextColor={colors.muted} style={styles.customInput} keyboardType="numbers-and-punctuation" />
-            <Button title={`${t("accept")} → ${t("customTime").toLowerCase()}`} variant="success" disabled={!validTime} onPress={() => run("accept", { time: customTime.trim() })} style={{ flex: 1 }} testID="staff-accept-custom-time" />
+            <Button title={t("customTime")} variant={isSel({ time: customTime.trim() }) && validTime ? "primary" : "secondary"} disabled={!validTime} onPress={() => pick({ time: customTime.trim() })} style={{ flex: 1 }} testID="staff-accept-custom-time" />
           </View>
+
+          <Text style={styles.actionLabel}>2 · {t("confirm")}</Text>
+          <Button
+            title={sel ? `${t("acceptAndConfirm")} · ${selTime}` : t("acceptAndConfirm")}
+            size="xl"
+            icon="check-circle"
+            variant="success"
+            disabled={!sel}
+            loading={action.isPending}
+            onPress={() => sel && run("accept", sel)}
+            testID="staff-accept-confirm"
+          />
           {!showReject ? (
-            <Button title={t("reject")} size="xl" icon="x-circle" variant="danger" onPress={() => setShowReject(true)} testID="staff-reject-button" />
+            <Button title={t("reject")} size="lg" icon="x-circle" variant="danger" onPress={() => setShowReject(true)} testID="staff-reject-button" />
           ) : (
             <View style={{ gap: 10 }}>
               <TextInput testID="staff-reject-reason" value={rejectReason} onChangeText={setRejectReason} placeholder={t("rejectReason")} placeholderTextColor={colors.muted} style={styles.customInput} />
@@ -251,7 +280,8 @@ const useStyles = makeStyles((colors) => ({
   pay: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.brandSecondary, letterSpacing: 0.5 },
   actionLabel: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   minuteGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  minuteBtn: { width: "30%", flexGrow: 1, height: 64, borderRadius: 14, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center" },
+  minuteBtn: { width: "30%", flexGrow: 1, height: 64, borderRadius: 14, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: colors.surfaceInverse },
+  minuteBtnSel: { backgroundColor: colors.success, borderColor: colors.brandSecondary },
   delayBtn: { backgroundColor: colors.warning },
   minuteText: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurfaceInverse },
   minuteUnit: { fontFamily: FONT_TEXT, fontSize: 11, color: colors.onSurfaceInverse, opacity: 0.8 },

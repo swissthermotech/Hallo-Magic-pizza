@@ -1,0 +1,25 @@
+{
+  "summary": "Verified the new 2-step staff order acceptance flow end-to-end on /staff via Expo web preview at both 390x844 (phone Modal) and 1200x800 (two-column) viewports. Step 1 (selecting a time via staff-accept-{15..60}, staff-confirm-requested-time, or staff-custom-time-input+staff-accept-custom-time) only updates local UI state - order stays 'pending' with no API call fired, the tapped chip is highlighted (success green background rgb(85,107,47)) and staff-accept-confirm becomes enabled and shows 'ACCEPTER ET CONFIRMER · HH:MM' (now+minutes in Europe/Zurich, or the exact time). Step 2 (tapping staff-accept-confirm) is the only trigger that calls POST /api/orders/{id}/accept: status flips to 'accepted', estimated_ready_at is set, accepted_at is set, printed=true (auto print), and the detail switches to in-progress actions (+5/+10/+15, EN PRÉPARATION, PRÊTE). Custom time overrides quick-minute selection and vice versa. staff-accept-confirm is aria-disabled=true before any selection. REFUSER (staff-reject-button -> staff-reject-confirm) still cancels a pending order independently of the accept flow. Behavior identical in 2-column right pane.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "staff-order.tsx 2-step logic (lines 76-87): 'sel' state cleanly captures either minutes or exact time; selTime uses toLocaleTimeString('fr-CH', timeZone:'Europe/Zurich') to compute display for minutes mode - matches server-side Zurich conversion of estimated_ready_at (verified: UI '20:15' -> backend estimated_ready_at '2026-09-15T18:15:00' UTC).",
+    "staff-order.tsx line 191: only sel-guarded run('accept', sel) is called on step 2. No API call fires when picking a time (verified via GET after each pick).",
+    "staff-order.tsx line 189: Button disabled={!sel} correctly renders aria-disabled='true' before selection and enables afterward.",
+    "staff-order.tsx line 165: staff-confirm-requested-time only appears when o.requested_time && requested_time !== 'asap' - proper conditional for scheduled orders."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "seed_data_creation": "Created 4 test orders via POST /api/orders: #108 pickup ASAP (accepted at now+20), #109 delivery scheduled 19:30 to 1723 Marly Route de Fribourg (accepted at 20:15 with time_changed=true), #110 pickup ASAP (used for REFUSER flow -> cancelled), #111 pickup ASAP (used for 1200x800 2-col accept at now+15). Test data is prefixed with 'TEST-' in general_note/customer name.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "2-step accept UI testIDs: staff-accept-{15,20,30,40,45,60}, staff-confirm-requested-time (only when requested_time is not 'asap'), staff-custom-time-input + staff-accept-custom-time (needs HH:MM format /^\\d{1,2}:\\d{2}$/), staff-accept-confirm (final). Disabled state exposed via aria-disabled='true'. When a minute chip is selected, its background switches to colors.success (rgb(85,107,47)). Time in confirm button label is formatted 'fr-CH' HH:MM in Europe/Zurich. Backend accept endpoint accepts {minutes} or {time} in body; when time is passed, estimated_ready_at is stored as UTC (e.g. 20:15 Zurich in September = 18:15 UTC) and time_changed=true. In 1200x800 the OrderDetail renders inside the right pane (no Modal, staff-detail-close not present). In 390x844 it renders inside a RN Modal - Playwright may need scrollIntoView on the target element (RN Web ScrollView uses transforms) before clicking; my helper uses el.scrollIntoView({block:'center'}) then click(force=True) with a JS-click fallback.",
+  "rca_of_issue": "Not applicable - feature works as designed."
+}
