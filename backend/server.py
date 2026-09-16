@@ -421,6 +421,7 @@ class Order(BaseDocument):
     picked_up_at: Optional[datetime] = None
     out_for_delivery_at: Optional[datetime] = None
     delivered_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
     ready_at: Optional[datetime] = None
     collection_method: Optional[str] = None  # cash | terminal | none (already paid / nothing to collect)
     amount_due: float = 0.0
@@ -731,7 +732,7 @@ def collection_fields(payment_method: str, total: float) -> dict:
     return {"collection_method": method, "amount_due": round(total, 2), "payment_collected": False}
 
 
-async def compute_order(body: OrderIn, user: Optional[dict]) -> Order:
+async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bool = True) -> Order:
     """Validates the cart against the live catalog and builds the full Order (prices + frozen VAT snapshot).
     Shared by customer checkout (/orders) and staff phone orders (/phone-orders)."""
     settings = await get_settings()
@@ -822,7 +823,7 @@ async def compute_order(body: OrderIn, user: Optional[dict]) -> Order:
         if settings.delivery_zones and not zone:
             raise HTTPException(400, "Zone de livraison non desservie")
         minimum = zone.minimum_order if zone and zone.minimum_order else settings.minimum_order
-        if goods < minimum:
+        if enforce_minimum and goods < minimum:
             raise HTTPException(400, f"Minimum de commande CHF {minimum:.2f} pour la livraison à {zone.city if zone else ''}")
         delivery_fee = settings.delivery_fee
         if settings.free_delivery_from and goods >= settings.free_delivery_from:
@@ -878,7 +879,7 @@ async def create_phone_order(body: PhoneOrderIn, _: dict = Depends(PHONE)):
     customer = await db.users.find_one({"_id": oid(body.customer_id)}) if body.customer_id else None
     body.source = "telephone"
     body.age_confirmed = True  # staff informs the caller; the 16+/18+ ID check happens at handover (ticket + dashboard warning)
-    order = await compute_order(body, customer)
+    order = await compute_order(body, customer, enforce_minimum=False)  # staff may confirm below the usual web/app minimum
     ts = now_utc()
     if body.requested_time and body.requested_time != "asap":
         ready = parse_local_time(body.requested_time)
@@ -947,9 +948,11 @@ async def driver_order(order_id: str, user: dict) -> dict:
 @api.get("/driver/orders", response_model=List[Order])
 async def driver_orders(user: dict = Depends(staff_mod.staff_user)):
     name = driver_of(user)
-    since = now_utc() - timedelta(hours=14)
+    _, start, end = day_range(None)  # current day in Europe/Zurich – history stays available to the manager reports
+    active = {"$in": ["accepted", "preparing", "ready", "assigned", "delivering"]}
     docs = await db.orders.find({"driver": name, "type": "delivery", "status": {"$nin": ["cancelled"]},
-                                 "$or": [{"status": {"$in": ["accepted", "preparing", "ready", "assigned", "delivering"]}}, {"delivered_at": {"$gte": since}}]}).sort("estimated_ready_at", 1).to_list(100)
+                                 "$or": [{"status": active, "$or": [{"assigned_at": {"$gte": start}}, {"estimated_ready_at": {"$gte": start, "$lt": end}}]},
+                                         {"status": {"$in": ["delivered", "completed"]}, "delivered_at": {"$gte": start}}]}).sort("estimated_ready_at", 1).to_list(100)
     return [Order.from_mongo(d) for d in docs]
 
 
@@ -988,7 +991,7 @@ async def driver_delivered(order_id: str, user: dict = Depends(staff_mod.staff_u
         return Order.from_mongo(doc)
     if doc["status"] != "delivering":
         raise HTTPException(409, "Appuyez d'abord sur PARTI / EN LIVRAISON")
-    return await push_status(doc, "delivered", make_notification("delivered", doc["order_number"]), {"delivered_at": now_utc()})
+    return await finish_order(doc, "delivered", make_notification("delivered", doc["order_number"]), {"delivered_at": now_utc()})
 
 
 class CollectIn(BaseModel):
@@ -1239,6 +1242,13 @@ async def push_status(doc: dict, status: str, notif: Optional[dict], extra_set: 
     return Order.from_mongo(new)
 
 
+async def finish_order(doc: dict, status: str, notif: Optional[dict], extra_set: Optional[dict] = None) -> Order:
+    """'picked_up' / 'delivered' close the order: the final status is recorded, then TERMINÉE automatically
+    (no extra manager tap). Both events stay in status_history."""
+    await push_status(doc, status, notif, extra_set)
+    return await push_status(doc, "completed", None, {"completed_at": now_utc()})
+
+
 @api.post("/orders/{order_id}/accept", response_model=Order)
 async def accept_order(order_id: str, body: AcceptIn, _: dict = Depends(STAFF)):
     doc = await load_order(order_id)
@@ -1330,7 +1340,10 @@ async def set_status(order_id: str, body: StatusIn, _: dict = Depends(STAFF)):
         ev = STATUS_EVENT.get(body.status)
     notif = make_notification(ev, n) if ev else None
     stamps = {"ready": "ready_at", "delivering": "out_for_delivery_at", "delivered": "delivered_at"}
-    return await push_status(doc, body.status, notif, {stamps[body.status]: now_utc()} if body.status in stamps else None)
+    extra = {stamps[body.status]: now_utc()} if body.status in stamps else None
+    if body.status in ("picked_up", "delivered"):
+        return await finish_order(doc, body.status, notif, extra)
+    return await push_status(doc, body.status, notif, extra)
 
 
 # ---------------------------------------------------------------------------

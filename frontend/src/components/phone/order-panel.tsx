@@ -42,7 +42,9 @@ export function OrderPanel(p: Props) {
   const total = goods + fee;
   const validTime = /^\d{1,2}:\d{2}$/.test(p.time.trim());
   const addrOk = !delivery || (p.address.street.trim() && p.address.npa.trim() && p.address.city.trim());
-  const canConfirm = !!p.customer && cart.items.length > 0 && addrOk && (p.timeMode === "asap" || validTime) && !(delivery && goods < minimum);
+  // Staff may confirm below the usual web/app minimum – only a warning is shown
+  const belowMinimum = delivery && minimum > 0 && goods < minimum;
+  const canConfirm = !!p.customer && cart.items.length > 0 && addrOk && (p.timeMode === "asap" || validTime);
   const payments: { key: PaymentMethod; label: string; icon: React.ComponentProps<typeof Feather>["name"] }[] = [
     { key: "cash", label: t("payCash"), icon: "dollar-sign" },
     { key: "terminal", label: t("payTerminal"), icon: "credit-card" },
@@ -127,7 +129,7 @@ export function OrderPanel(p: Props) {
         {delivery ? <Text style={styles.recapLine}>{p.address.street} {p.address.number}, {p.address.npa} {p.address.city}{p.address.instructions ? ` · ${p.address.instructions}` : ""}</Text> : null}
         <Text style={styles.recapLine}>{delivery ? t("delivery") : t("pickup")} · {p.timeMode === "asap" ? t("asap") : p.time || "--:--"} · {payments.find((x) => x.key === p.payment)?.label}</Text>
         {cart.requiredAge ? <Text style={[styles.recapLine, { color: colors.warning, fontWeight: "800" }]}>⚠ {t("ageCheckRequired")}: {cart.requiredAge}+</Text> : null}
-        {delivery && goods < minimum ? <Text style={[styles.recapLine, { color: colors.error }]}>{t("minOrder")}{zone ? ` (${zone.city})` : ""}: {chf(minimum)}</Text> : null}
+        {belowMinimum ? <Text style={[styles.recapLine, { color: colors.warning, fontWeight: "800" }]} testID="phone-below-minimum">⚠ {t("belowMinimum")} ({t("minOrder")}{zone ? ` ${zone.city}` : ""}: {chf(minimum)})</Text> : null}
         <View style={styles.divider} />
         <Row label={t("subtotal")} value={chf(cart.subtotal)} inverse />
         <Row label={t("extrasTotal")} value={chf(cart.extrasTotal)} inverse />

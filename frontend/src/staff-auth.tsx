@@ -13,16 +13,18 @@ interface StaffCtx {
   isDriver: boolean;
   driverName: string | null; // "Livreur 1" ...
   unlock: (pin: string) => Promise<StaffRole | null>;
+  lastError: string | null; // server message of the last failed unlock (e.g. inactive driver position)
   lock: () => void;
 }
 
-const Ctx = createContext<StaffCtx>({ ready: false, unlocked: false, role: null, label: "", isDriver: false, driverName: null, unlock: async () => null, lock: () => {} });
+const Ctx = createContext<StaffCtx>({ ready: false, unlocked: false, role: null, label: "", isDriver: false, driverName: null, unlock: async () => null, lock: () => {}, lastError: null });
 
 /** Server-side staff authentication: the PIN is verified by the backend (Argon2 hashes), which returns a role JWT.
  * Nothing secret lives in the frontend. Roles: manager, kitchen, phone, driver1..3. */
 export function StaffProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<{ token: string; role: StaffRole; label: string } | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   useEffect(() => {
     storage.secureGet<string>(KEY, "").then(async (raw) => {
@@ -48,8 +50,10 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
       const s = { token: r.access_token, role: r.role, label: r.label };
       setSession(s);
       await storage.secureSet(KEY, JSON.stringify(s));
+      setLastError(null);
       return r.role;
-    } catch {
+    } catch (e: any) {
+      setLastError(e?.status === 403 ? e.message : null);
       return null;
     }
   }, []);
@@ -62,8 +66,8 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<StaffCtx>(() => {
     const role = session?.role ?? null;
     const isDriver = !!role && role.startsWith("driver");
-    return { ready, unlocked: !!session, role, label: session?.label ?? "", isDriver, driverName: isDriver ? `Livreur ${role!.slice(-1)}` : null, unlock, lock };
-  }, [ready, session, unlock, lock]);
+    return { ready, unlocked: !!session, role, label: session?.label ?? "", isDriver, driverName: isDriver ? `Livreur ${role!.slice(-1)}` : null, unlock, lock, lastError };
+  }, [ready, session, unlock, lock, lastError]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

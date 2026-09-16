@@ -62,7 +62,7 @@ export default function DriverScreen() {
           {isError ? <View style={styles.offline} testID="driver-offline"><Feather name="wifi-off" size={16} color={colors.onError} /><Text style={styles.offlineText}>{t("loadError")}</Text></View> : null}
           {active.length === 0 ? <Empty icon="truck" title={t("noDeliveries")} /> : null}
           {active.map((o) => <DeliveryCard key={o.id} o={o} focus={o.id === focusId} onAction={run} onMap={openMap} busy={act.isPending} />)}
-          {done.length ? <Text style={styles.doneTitle}>{t("done")} · {done.length}</Text> : null}
+          {done.length ? <Text style={styles.doneTitle} testID="driver-done-today">{t("doneToday")} · {done.length}</Text> : null}
           {done.map((o) => <DeliveryCard key={o.id} o={o} onAction={run} onMap={openMap} busy={act.isPending} compact />)}
         </ScrollView>
       )}
@@ -106,14 +106,10 @@ function DeliveryCard({ o, focus, onAction, onMap, busy, compact }: { o: Order; 
       </View>
       <Button title={t("openMap")} icon="navigation" variant="outline" onPress={() => onMap(o)} testID={`driver-map-${o.id}`} />
 
-      {!compact ? (
-        <View style={{ gap: 10 }}>
-          {!o.picked_up_at && o.status !== "delivering" ? <Button title={t("takeOver")} size="xl" icon="package" variant="secondary" loading={busy} onPress={() => onAction(o, "pickup")} testID={`driver-pickup-${o.id}`} /> : null}
-          {o.status !== "delivering" ? <Button title={t("departed")} size="xl" icon="truck" loading={busy} onPress={() => onAction(o, "depart")} testID={`driver-depart-${o.id}`} /> : null}
-          {o.status === "delivering" ? <Button title={t("deliveredAction")} size="xl" icon="home" variant="success" loading={busy} onPress={() => onAction(o, "delivered")} testID={`driver-delivered-${o.id}`} /> : null}
-        </View>
-      ) : null}
-      {!paid ? <Button title={`${t("confirmCollected")} · ${chf(o.amount_due || o.total)}`} icon="check-circle" variant={compact ? "primary" : "outline"} loading={busy} onPress={() => onAction(o, "collect", { method })} testID={`driver-collect-${o.id}`} /> : <Text style={[styles.hint, { color: colors.success, fontWeight: "800" }]}>✓ {t("collected")} {fmtTime(o.collected_at)}</Text>}
+      {/* Flow: Assigned → PARTI / EN LIVRAISON → payment confirmation → LIVRÉE */}
+      {!compact && o.status !== "delivering" ? <Button title={t("departed")} size="xl" icon="truck" loading={busy} onPress={() => onAction(o, "depart")} testID={`driver-depart-${o.id}`} /> : null}
+      {!paid ? <Button title={`${t("confirmCollected")} · ${chf(o.amount_due || o.total)}`} size={compact ? "md" : "lg"} icon="check-circle" variant={o.status === "delivering" ? "secondary" : "outline"} loading={busy} onPress={() => onAction(o, "collect", { method })} testID={`driver-collect-${o.id}`} /> : <Text style={[styles.hint, { color: colors.success, fontWeight: "800" }]}>✓ {t("collected")} {fmtTime(o.collected_at)}</Text>}
+      {!compact && o.status === "delivering" ? <Button title={t("deliveredAction")} size="xl" icon="home" variant="success" loading={busy} onPress={() => onAction(o, "delivered")} testID={`driver-delivered-${o.id}`} /> : null}
     </View>
   );
 }

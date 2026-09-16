@@ -72,6 +72,7 @@ export function useOrder(id: string | undefined, pollMs = 4000) {
     queryFn: () => api.get<Order>(`/orders/${id}`),
     enabled: !!id,
     refetchInterval: pollMs,
+    refetchIntervalInBackground: true,
   });
 }
 
@@ -89,6 +90,8 @@ export function useActiveOrders(pollMs = 3000) {
     queryKey: ["orders", "active"],
     queryFn: () => api.get<Order[]>("/orders?active=true"),
     refetchInterval: pollMs,
+    refetchIntervalInBackground: true, // manager dashboard keeps syncing driver/payment changes without manual refresh
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -354,6 +357,7 @@ export function useSaveClosing() {
   });
 }
 export const staffPins = {
-  roles: () => api.get<{ role: string; label: string }[]>("/auth/staff/roles"),
+  roles: () => api.get<{ role: string; label: string; active: boolean }[]>("/auth/staff/roles"),
   change: (role: string, pin: string) => api.put("/auth/staff/pins", { role, pin }),
+  setActive: (role: string, active: boolean) => api.put<{ role: string; active: boolean }>(`/auth/staff/drivers/${role}/active`, { active }),
 };

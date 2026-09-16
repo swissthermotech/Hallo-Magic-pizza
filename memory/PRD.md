@@ -73,6 +73,13 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Regression suite: `tests/test_security_iter8.py` (401 unauth, 403 wrong role, allowed roles, customer token ≠ staff token, driver isolation, public endpoints, no secrets) + `tests/conftest.py` injects a manager token into the older functional suites. 110 backend tests passing.
 - ⚠ Note: `PUT /settings` replaces the whole settings document – always send the full object (admin screen does).
 
+## Implemented (2026-06) – operational refinements (iteration 9)
+- Phone orders: no hard delivery minimum for staff (`compute_order(enforce_minimum=False)`), warning "Sous le minimum de livraison habituel" shown; web/app rule unchanged.
+- Driver screen: today only (Europe/Zurich day; active first, "Terminées aujourd'hui" section); PRISE EN CHARGE removed – flow Assigned → PARTI / EN LIVRAISON → confirm collection → LIVRÉE (timestamps kept; `/pickup` endpoint still exists for audit but unused).
+- Auto-completion: LIVRÉE (driver or staff) and RETIRÉE → status `completed` automatically (`finish_order`, both events in status_history, `completed_at`). Manager "En cours" refreshes by 3 s polling incl. background.
+- Driver shift access: `staff_auth.active` per driver position, `PUT /api/auth/staff/drivers/{role}/active` (manager), ACTIF/INACTIF toggles in Admin → Sécurité; inactive → login 403 and existing sessions rejected; driver JWT expires at 03:00 Zurich (end of shift). Login screen shows the server message (e.g. poste INACTIF).
+- Tests: `tests/test_refinements_iter9.py` (6) + frontend iteration 9 (5/5).
+
 ## Backlog
 - P0: PrintNode live credentials + real ESC/POS ticket test on Epson TM-T70II; staff PIN protection.
 - P1: real push notifications (Emergent push after build), favourites + one-tap reorder for account holders, dedicated driver view (age-check warning already in staff detail), web layout polish for desktop widths, category manager UI, extras per-size pricing.

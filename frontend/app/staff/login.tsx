@@ -16,7 +16,7 @@ export default function StaffLogin() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t } = useI18n();
-  const { unlock } = useStaff();
+  const { unlock, lastError } = useStaff();
   const [pin, setPin] = useState("");
   const [error, setError] = useState(false);
 
@@ -52,7 +52,7 @@ export default function StaffLogin() {
             onSubmitEditing={submit}
             style={[styles.input, error && { borderColor: colors.error }]}
           />
-          {error ? <Text style={styles.error} testID="staff-pin-error">{t("wrongPin")}</Text> : null}
+          {error ? <Text style={styles.error} testID="staff-pin-error">{lastError || t("wrongPin")}</Text> : null}
           <Button title={t("unlock")} size="lg" icon="unlock" onPress={submit} disabled={pin.length < 4} testID="staff-pin-submit" />
         </View>
       </KeyboardAvoidingView>

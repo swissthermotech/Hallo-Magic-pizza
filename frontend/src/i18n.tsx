@@ -198,6 +198,11 @@ const STRINGS = {
     source_android: "Android",
     source_web: "Web",
     // driver / closing / security
+    belowMinimum: "Sous le minimum de livraison habituel",
+    doneToday: "Terminées aujourd'hui",
+    activePos: "ACTIF",
+    inactivePos: "INACTIF",
+    shiftHint: "Poste inactif = connexion refusée. La session d'un livreur expire automatiquement en fin de journée (03h00).",
     driverScreen: "Mes livraisons",
     noDeliveries: "Aucune livraison attribuée pour le moment",
     takeOver: "PRISE EN CHARGE",
@@ -523,6 +528,11 @@ const STRINGS = {
     source_android: "Android",
     source_web: "Web",
     // driver / closing / security
+    belowMinimum: "Unter dem üblichen Liefer-Mindestbestellwert",
+    doneToday: "Heute abgeschlossen",
+    activePos: "AKTIV",
+    inactivePos: "INAKTIV",
+    shiftHint: "Inaktiver Posten = Anmeldung verweigert. Kurier-Sitzungen laufen automatisch am Tagesende (03:00) ab.",
     driverScreen: "Meine Lieferungen",
     noDeliveries: "Derzeit keine zugewiesene Lieferung",
     takeOver: "ÜBERNOMMEN",
