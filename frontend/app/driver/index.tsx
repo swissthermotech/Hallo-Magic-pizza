@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { ActivityIndicator, Linking, Platform, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,6 +25,7 @@ export default function DriverScreen() {
   const { ready, unlocked, isDriver, driverName, lock, label } = useStaff();
   const { data, isLoading, isError, refetch, isRefetching } = useDriverOrders();
   const act = useDriverAction();
+  const [showHistory, setShowHistory] = useState(false);
 
   if (!ready) return <View style={[styles.screen, styles.center]}><ActivityIndicator color={colors.brandPrimary} /></View>;
   if (!unlocked) return <Redirect href="/staff/login?switch=1" />;
@@ -42,6 +43,7 @@ export default function DriverScreen() {
     );
   }
 
+  // Server already returns only THIS identity's deliveries, active first, sorted by promised time
   const orders = [...(data ?? [])].sort((a, b) => (a.id === focusId ? -1 : b.id === focusId ? 1 : 0));
   const active = orders.filter((o) => !["delivered", "completed"].includes(o.status));
   const done = orders.filter((o) => ["delivered", "completed"].includes(o.status));
@@ -74,8 +76,14 @@ export default function DriverScreen() {
           {isError ? <View style={styles.offline} testID="driver-offline"><Feather name="wifi-off" size={16} color={colors.onError} /><Text style={styles.offlineText}>{t("loadError")}</Text></View> : null}
           {active.length === 0 ? <Empty icon="truck" title={t("noDeliveries")} /> : null}
           {active.map((o) => <DeliveryCard key={o.id} o={o} focus={o.id === focusId} onAction={run} onMap={openMap} busy={act.isPending} />)}
-          {done.length ? <Text style={styles.doneTitle} testID="driver-done-today">{t("doneToday")} · {done.length}</Text> : null}
-          {done.map((o) => <DeliveryCard key={o.id} o={o} onAction={run} onMap={openMap} busy={act.isPending} compact />)}
+          {done.length ? (
+            <Pressable testID="driver-history-toggle" onPress={() => setShowHistory((v) => !v)} style={styles.historyBtn}>
+              <Feather name="archive" size={16} color={colors.muted} />
+              <Text style={styles.doneTitle} testID="driver-done-today">{t("history")} · {t("doneToday").toLowerCase()} · {done.length}</Text>
+              <Feather name={showHistory ? "chevron-up" : "chevron-down"} size={18} color={colors.muted} />
+            </Pressable>
+          ) : null}
+          {showHistory ? done.map((o) => <DeliveryCard key={o.id} o={o} onAction={run} onMap={openMap} busy={act.isPending} compact />) : null}
         </ScrollView>
       )}
     </View>
@@ -152,5 +160,6 @@ const useStyles = makeStyles((colors) => ({
   note: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "700", color: colors.warning, marginTop: 4 },
   switchTitle: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurface, textAlign: "center" },
   switchText: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.muted, textAlign: "center" },
-  doneTitle: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.8, marginTop: 8 },
+  doneTitle: { flex: 1, fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.8 },
+  historyBtn: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 48, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginTop: 8 },
 }));

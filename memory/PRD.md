@@ -116,3 +116,9 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 ## Next tasks
 1. Collect PrintNode API key + printer ID and test a real print.
 3. Wire push notifications after first publish/build.
+
+## Iteration 14 (2026-06) – phone-accept investigation + driver cleanup
+- Investigation: #1387 (Poste 2) / #1388 (Poste 1) were still PENDING server-side – no `/accept` request ever reached the backend for them. The only acceptance in that window was #1365, a pre-go-live TEST web order → `skipped_historical` (no ticket by design). #1384 (Poste 1, accepted 18:32) DID print → the shared accept path works for phone orders.
+- Changes: `Order.legacy` (created before `printing_enabled_at`) computed in `GET /orders`; Manager operational lists (NOUVELLES/EN COURS/PROGRAMMÉES, alert sound) exclude legacy orders → they sit in "Historique" with a "TEST · avant mise en service · pas de ticket" badge, no quick buttons. Quick-accept toast now reports the print outcome (envoyé / ancienne commande / échoué / simulé). `GET /orders` limit 400.
+- Driver: `GET /driver/orders` returns only deliveries of the CURRENT identity (driver_name or shift_id match), created after go-live, active first sorted by promised time; driver screen shows active cards + collapsed "Historique · terminées aujourd'hui". Nothing deleted.
+- Test data inventory: 1 275 orders created before go-live (16:30:25 UTC 17.09) = development/test data (1 115 still non-terminal); 9 real orders after. Awaiting user approval before any deletion.

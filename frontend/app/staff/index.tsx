@@ -52,7 +52,7 @@ export default function StaffDashboard() {
       known.current = new Set(pendingIds);
       return;
     }
-    const fresh = data.find((o) => o.status === "pending" && !known.current!.has(o.id));
+    const fresh = data.find((o) => o.status === "pending" && !o.legacy && !known.current!.has(o.id));
     pendingIds.forEach((id) => known.current!.add(id));
     if (fresh) {
       setAlert(fresh);
@@ -68,20 +68,22 @@ export default function StaffDashboard() {
     }
   }, [data, soundOn, player]);
 
+  // Operational lists only contain live orders; pre-go-live test data (legacy) and finished orders live in Historique
+  const live = useMemo(() => orders.filter((o) => !o.legacy), [orders]);
   const counts = useMemo(() => ({
-    new: orders.filter((o) => o.status === "pending" && !isScheduledLater(o)).length,
-    scheduled: orders.filter((o) => isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)).length,
-    scheduledPending: orders.filter((o) => isScheduledLater(o) && o.status === "pending").length,
-    progress: orders.filter((o) => !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)).length,
-    done: orders.filter((o) => ["completed", "cancelled"].includes(o.status)).length,
-  }), [orders]);
+    new: live.filter((o) => o.status === "pending" && !isScheduledLater(o)).length,
+    scheduled: live.filter((o) => isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)).length,
+    scheduledPending: live.filter((o) => isScheduledLater(o) && o.status === "pending").length,
+    progress: live.filter((o) => !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)).length,
+    done: orders.filter((o) => o.legacy || ["completed", "cancelled"].includes(o.status)).length,
+  }), [orders, live]);
 
   const list = orders
     .filter((o) =>
-      filter === "new" ? o.status === "pending" && !isScheduledLater(o)
-        : filter === "scheduled" ? isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)
-          : filter === "progress" ? !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)
-            : ["completed", "cancelled"].includes(o.status),
+      filter === "new" ? !o.legacy && o.status === "pending" && !isScheduledLater(o)
+        : filter === "scheduled" ? !o.legacy && isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)
+          : filter === "progress" ? !o.legacy && !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)
+            : o.legacy || ["completed", "cancelled"].includes(o.status),
     )
     .sort((a, b) => (filter === "scheduled" ? (a.scheduled_for || "").localeCompare(b.scheduled_for || "") : 0));
   const selected = orders.find((o) => o.id === selectedId) ?? (twoCol ? list[0] : undefined);
@@ -137,7 +139,7 @@ export default function StaffDashboard() {
       <View style={styles.secondaryRow}>
         <Pressable testID="staff-filter-done" onPress={() => setFilter("done")} style={[styles.doneLink, filter === "done" && styles.doneLinkOn]}>
           <Feather name="archive" size={14} color={filter === "done" ? colors.onSurfaceInverse : colors.muted} />
-          <Text style={[styles.doneLinkText, filter === "done" && { color: colors.onSurfaceInverse }]}>{t("done")} · {counts.done}</Text>
+          <Text style={[styles.doneLinkText, filter === "done" && { color: colors.onSurfaceInverse }]}>{t("history")} · {counts.done}</Text>
         </Pressable>
       </View>
       {role === "manager" ? <FirstDeliveryControl /> : null}

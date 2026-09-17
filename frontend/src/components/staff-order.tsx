@@ -42,14 +42,21 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
   const quickAccept = (body: { minutes?: number; time?: string }) => {
     Haptics.selectionAsync().catch(() => {});
     action.mutateAsync({ id: o.id, action: "accept", body })
-      .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}))
+      .then((res) => {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        const ps = res.print_status;
+        if (ps === "sent") toast.show(`#${o.order_number} · ${t("ticketSent")}`, "success");
+        else if (ps === "skipped_historical") toast.show(`#${o.order_number} · ${t("ticketSkippedLegacy")}`, "info");
+        else if (ps === "failed") toast.show(`#${o.order_number} · ${t("ticketFailed")}`, "error");
+        else if (ps === "simulated") toast.show(`#${o.order_number} · ${t("ticketSimulated")}`, "info");
+      })
       .catch((e) => toast.show(e?.message || "Erreur", "error"));
   };
   const quickAssign = (d: string) => {
     Haptics.selectionAsync().catch(() => {});
     assign.mutateAsync({ id: o.id, driver: d }).catch((e) => toast.show(e?.message || "Erreur", "error"));
   };
-  const showDrivers = o.type === "delivery" && !pending && !closed && !["delivering", "delivered"].includes(o.status);
+  const showDrivers = o.type === "delivery" && !pending && !closed && !o.legacy && !["delivering", "delivered"].includes(o.status);
   return (
     <Pressable testID={`staff-order-card-${o.id}`} onPress={onPress} style={[styles.card, selected && styles.cardSelected, pending && styles.cardPending]}>
       {scheduledLater ? (
@@ -58,6 +65,7 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
           <Text style={styles.schedBannerText}>{t("scheduled").toUpperCase()} · {fmtDay(o.requested_date!)} · {o.requested_time} · {t("notForToday")}</Text>
         </View>
       ) : null}
+      {o.legacy ? <Badge label={t("legacyOrder")} tone="neutral" testID={`staff-card-legacy-${o.id}`} /> : null}
       {/* 1. Number + type + status */}
       <View style={styles.cardHead}>
         <Text style={styles.cardNum}>#{o.order_number}</Text>
@@ -85,7 +93,7 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
         </View>
       </View>
       {/* 4. Quick actions – pending: accept in one tap (existing accept endpoint → one ticket) */}
-      {pending ? (
+      {pending && !o.legacy ? (
         <View style={styles.quickRow} testID={`staff-quick-accept-${o.id}`}>
           {requested ? (
             <Pressable testID={`staff-quick-confirm-${o.id}`} disabled={action.isPending} onPress={() => quickAccept({ time: requested })} style={[styles.quickBtn, styles.quickBtnConfirm, { flexBasis: "100%" }]}>

@@ -174,6 +174,7 @@ export interface OrderItem {
   extras: OrderExtra[];
   note?: string | null;
   line_total: number;
+  half?: { product_id: string; name: I18nText; removed_ingredients: Ingredient[]; note?: string | null } | null; // MOITIÉ/MOITIÉ (phone orders)
 }
 
 export interface Customer {
@@ -216,6 +217,7 @@ export interface Order {
   address?: Address | null;
   requested_time?: string | null;
   requested_date?: string | null; // future-day (scheduled) order
+  legacy?: boolean; // created before the printer went live (test data) – shown in Historique only
   scheduled_for?: string | null;
   general_note?: string | null;
   payment_method: string;

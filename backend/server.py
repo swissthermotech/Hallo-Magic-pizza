@@ -442,6 +442,7 @@ class Order(BaseDocument):
     driver: Optional[str] = None        # delivery: "Livreur 1" / "Livreur 2" / "Livreur 3"
     driver_name: Optional[str] = None   # person who did the delivery (snapshot; updated to the performer on "livrée") – kept in history
     shift_id: Optional[str] = None      # driver_shifts id of that person's service (stable identity for reports)
+    legacy: bool = False                # computed: created before the printer went live (development/test data) – never prints
     reprint_count: int = 0
     assigned_at: Optional[datetime] = None
     picked_up_at: Optional[datetime] = None
@@ -1045,13 +1046,23 @@ async def driver_order(order_id: str, user: dict) -> dict:
 
 @api.get("/driver/orders", response_model=List[Order])
 async def driver_orders(user: dict = Depends(staff_mod.staff_user)):
+    """Operational list for the person on shift: ONLY deliveries assigned to this identity (slot + name / shift),
+    active first (sorted by promised time), plus today's own delivered ones for the collapsed history.
+    Deliveries made by another person on the same slot and pre-go-live test data never appear."""
     name = driver_of(user)
-    _, start, end = day_range(None)  # current day in Europe/Zurich – history stays available to the manager reports
+    _, start, end = day_range(None)
+    settings = await get_settings()
     active = {"$in": ["accepted", "preparing", "ready", "assigned", "delivering"]}
-    docs = await db.orders.find({"driver": name, "type": "delivery", "status": {"$nin": ["cancelled"]},
-                                 "$or": [{"status": active, "$or": [{"assigned_at": {"$gte": start}}, {"estimated_ready_at": {"$gte": start, "$lt": end}}]},
-                                         {"status": {"$in": ["delivered", "completed"]}, "delivered_at": {"$gte": start}}]}).sort("estimated_ready_at", 1).to_list(100)
-    return [Order.from_mongo(d) for d in docs]
+    mine = {"driver": name, "type": "delivery", "status": {"$nin": ["cancelled"]},
+            "$or": [{"driver_name": user.get("name")}, {"shift_id": user.get("shift_id")}]}
+    if settings.printing_enabled_at:
+        mine["created_at"] = {"$gte": settings.printing_enabled_at}
+    docs = await db.orders.find({**mine, "$and": [{"$or": [{"status": active},
+                                                           {"status": {"$in": ["delivered", "completed"]}, "delivered_at": {"$gte": start}}]}]}).to_list(200)
+    def key(d):
+        when = d.get("estimated_ready_at") or d.get("scheduled_for") or d.get("created_at")
+        return (0 if d["status"] in active["$in"] else 1, when.replace(tzinfo=None) if when else datetime.max)
+    return [Order.from_mongo(d) for d in sorted(docs, key=key)]
 
 
 @api.post("/driver/orders/{order_id}/pickup", response_model=Order)
@@ -1252,7 +1263,7 @@ async def search_customers(phone: str = Query(min_length=3), limit: int = 20, _:
 
 
 @api.get("/orders", response_model=List[Order])
-async def list_orders(active: bool = True, ids: Optional[str] = None, limit: int = 100, credentials: HTTPAuthorizationCredentials = Depends(auth_mod.bearer)):
+async def list_orders(active: bool = True, ids: Optional[str] = None, limit: int = 400, credentials: HTTPAuthorizationCredentials = Depends(auth_mod.bearer)):
     """`ids=` -> the customer's own orders (device-stored ids, no auth). Without ids -> full staff list (manager/kitchen only)."""
     q: Dict[str, Any] = {}
     if ids:
@@ -1267,6 +1278,9 @@ async def list_orders(active: bool = True, ids: Optional[str] = None, limit: int
             {"status": {"$in": list(TERMINAL)}, "created_at": {"$gte": now_utc() - timedelta(hours=3)}},
         ]
     docs = await db.orders.find(q).sort("created_at", -1).to_list(limit)
+    settings = await get_settings()
+    for d in docs:
+        d["legacy"] = is_historical(d, settings)  # dashboards move these out of the operational lists
     return [Order.from_mongo(d) for d in docs]
 
 
