@@ -1,6 +1,6 @@
 import React from "react";
 import { ActivityIndicator, View } from "react-native";
-import { Redirect, Stack, usePathname } from "expo-router";
+import { Redirect, Stack, useGlobalSearchParams, usePathname } from "expo-router";
 import { themes } from "@/src/theme";
 import { homeFor, useStaff } from "@/src/staff-auth";
 
@@ -8,6 +8,7 @@ export default function StaffLayout() {
   const { ready, unlocked, role } = useStaff();
   const pathname = usePathname();
   const isLogin = pathname.startsWith("/staff/login");
+  const { switch: switching } = useGlobalSearchParams<{ switch?: string }>();
 
   if (!ready) {
     return (
@@ -17,7 +18,9 @@ export default function StaffLayout() {
     );
   }
   if (!unlocked && !isLogin) return <Redirect href="/staff/login" />;
-  if (unlocked && isLogin) return <Redirect href={homeFor(role!)} />;
+  // Already unlocked on this device -> go to the role's home, unless the user explicitly wants to switch account (?switch=1)
+  if (unlocked && isLogin && !switching) return <Redirect href={homeFor(role!)} />;
+  if (isLogin) return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themes.light.surface } }} />;
   // Role boundaries: drivers only see /driver, phone role only /phone-orders, admin & closing are manager-only
   if (unlocked && role && role.startsWith("driver")) return <Redirect href="/driver" />;
   if (unlocked && role === "phone" && !pathname.startsWith("/staff/ticket")) return <Redirect href="/phone-orders" />;

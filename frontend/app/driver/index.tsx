@@ -22,13 +22,25 @@ export default function DriverScreen() {
   const { t } = useI18n();
   const toast = useToast();
   const { o: focusId } = useLocalSearchParams<{ o?: string }>();
-  const { ready, unlocked, isDriver, driverName, lock } = useStaff();
+  const { ready, unlocked, isDriver, driverName, lock, label } = useStaff();
   const { data, isLoading, isError, refetch, isRefetching } = useDriverOrders();
   const act = useDriverAction();
 
   if (!ready) return <View style={[styles.screen, styles.center]}><ActivityIndicator color={colors.brandPrimary} /></View>;
-  if (!unlocked) return <Redirect href="/staff/login" />;
-  if (!isDriver) return <Redirect href="/staff" />;
+  if (!unlocked) return <Redirect href="/staff/login?switch=1" />;
+  if (!isDriver) {
+    // A manager/kitchen/phone session is active on this device: never send the driver to the dashboard –
+    // offer to switch to a driver login instead.
+    return (
+      <View style={[styles.screen, styles.center, { padding: 24, gap: 14 }]} testID="driver-switch-account">
+        <Feather name="truck" size={40} color={colors.brandPrimary} />
+        <Text style={styles.switchTitle}>{t("driverScreen")}</Text>
+        <Text style={styles.switchText}>{t("sessionActive")}: {label}</Text>
+        <Button title={t("loginAsDriver")} size="lg" icon="log-in" onPress={() => { lock(); router.replace("/staff/login?switch=1"); }} testID="driver-switch-login" />
+        <Button title={t("back")} variant="outline" onPress={() => router.replace("/staff")} testID="driver-switch-back" />
+      </View>
+    );
+  }
 
   const orders = [...(data ?? [])].sort((a, b) => (a.id === focusId ? -1 : b.id === focusId ? 1 : 0));
   const active = orders.filter((o) => !["delivered", "completed"].includes(o.status));
@@ -138,5 +150,7 @@ const useStyles = makeStyles((colors) => ({
   phone: { fontFamily: FONT_TEXT, fontSize: 18, fontWeight: "700", color: colors.brandPrimary, paddingVertical: 4 },
   addr: { fontFamily: FONT_TEXT, fontSize: 18, color: colors.onSurface, lineHeight: 24 },
   note: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "700", color: colors.warning, marginTop: 4 },
+  switchTitle: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurface, textAlign: "center" },
+  switchText: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.muted, textAlign: "center" },
   doneTitle: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.8, marginTop: 8 },
 }));

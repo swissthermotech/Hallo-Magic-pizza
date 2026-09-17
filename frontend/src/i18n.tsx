@@ -198,6 +198,9 @@ const STRINGS = {
     source_android: "Android",
     source_web: "Web",
     // driver / closing / security
+    switchAccountHint: "saisissez un autre code pour changer de compte",
+    sessionActive: "Session active sur cet appareil",
+    loginAsDriver: "Se connecter comme livreur",
     belowMinimum: "Sous le minimum de livraison habituel",
     doneToday: "Terminées aujourd'hui",
     activePos: "ACTIF",
@@ -528,6 +531,9 @@ const STRINGS = {
     source_android: "Android",
     source_web: "Web",
     // driver / closing / security
+    switchAccountHint: "anderen Code eingeben, um das Konto zu wechseln",
+    sessionActive: "Aktive Sitzung auf diesem Gerät",
+    loginAsDriver: "Als Kurier anmelden",
     belowMinimum: "Unter dem üblichen Liefer-Mindestbestellwert",
     doneToday: "Heute abgeschlossen",
     activePos: "AKTIV",

@@ -80,6 +80,10 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Driver shift access: `staff_auth.active` per driver position, `PUT /api/auth/staff/drivers/{role}/active` (manager), ACTIF/INACTIF toggles in Admin → Sécurité; inactive → login 403 and existing sessions rejected; driver JWT expires at 03:00 Zurich (end of shift). Login screen shows the server message (e.g. poste INACTIF).
 - Tests: `tests/test_refinements_iter9.py` (6) + frontend iteration 9 (5/5).
 
+## Fixed (2026-06) – driver login / redirect
+- Cause: on web the staff session is stored per browser (one session per device). With a Manager/Kitchen session already stored, `/driver` redirected non-drivers to `/staff`, and `/staff/login` auto-redirected any unlocked session to its home before a driver PIN could be typed – so driver PINs "ended up" on the dashboard. Livreur 2/3 had also been left INACTIF by a test run (403 shown as generic error).
+- Fix: `/driver` with a non-driver session shows a gate "Session active: … → Se connecter comme livreur" (locks the session, opens `/staff/login?switch=1`) – never the dashboard; `/staff/login?switch=1` shows the PIN form even when unlocked (account switch); login screen displays the server reason (e.g. poste INACTIF). Drivers still can't open /staff, /staff/admin or /phone-orders (redirected to /driver); kitchen/manager/phone can't see driver data.
+
 ## Backlog
 - P0: PrintNode live credentials + real ESC/POS ticket test on Epson TM-T70II; staff PIN protection.
 - P1: real push notifications (Emergent push after build), favourites + one-tap reorder for account holders, dedicated driver view (age-check warning already in staff detail), web layout polish for desktop widths, category manager UI, extras per-size pricing.

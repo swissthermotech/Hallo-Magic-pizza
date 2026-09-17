@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Text, TextInput, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Feather } from "@react-native-vector-icons/feather";
@@ -16,7 +16,8 @@ export default function StaffLogin() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t } = useI18n();
-  const { unlock, lastError } = useStaff();
+  const { unlock, lastError, unlocked, label } = useStaff();
+  const { switch: switching } = useLocalSearchParams<{ switch?: string }>();
   const [pin, setPin] = useState("");
   const [error, setError] = useState(false);
 
@@ -34,7 +35,7 @@ export default function StaffLogin() {
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title={t("staffAccess")} testID="staff-login-title" />
+      <ScreenHeader title={t("staffAccess")} subtitle={switching && unlocked ? `${t("sessionActive")}: ${label} – ${t("switchAccountHint")}` : undefined} testID="staff-login-title" />
       <KeyboardAvoidingView behavior="padding" style={{ flex: 1 }} keyboardVerticalOffset={16}>
         <View style={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
           <View style={styles.lockIcon}><Feather name="lock" size={30} color={colors.onSurfaceInverse} /></View>
