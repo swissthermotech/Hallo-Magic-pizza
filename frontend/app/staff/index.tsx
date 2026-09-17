@@ -122,19 +122,25 @@ export default function StaffDashboard() {
 
       {/* Filters: full-width segmented control, then (manager) the collapsible first-delivery card */}
       <View style={styles.segment} testID="staff-filters">
-        {(["new", "scheduled", "progress", "done"] as Filter[]).map((f) => {
+        {(["new", "progress", "scheduled"] as Filter[]).map((f) => {
           const on = filter === f;
-          const lbl = f === "new" ? t("newOrders") : f === "scheduled" ? t("scheduled") : f === "progress" ? t("inProgress") : t("done");
+          const lbl = f === "new" ? t("newOrders") : f === "scheduled" ? t("scheduled") : t("inProgress");
           const alert = (f === "new" && counts.new > 0) || (f === "scheduled" && counts.scheduledPending > 0);
           return (
-            <Pressable key={f} testID={`staff-filter-${f}`} onPress={() => setFilter(f)} style={[styles.segBtn, twoCol && { flexBasis: "22%" }, on && styles.segBtnOn, alert && !on && styles.segBtnAlert]}>
-              <Text style={[styles.segText, on && styles.segTextOn]} numberOfLines={1}>{lbl}</Text>
-              <View style={[styles.segCount, on && styles.segCountOn]}><Text style={[styles.segCountText, on && styles.segCountTextOn]}>{counts[f]}</Text></View>
+            <Pressable key={f} testID={`staff-filter-${f}`} onPress={() => setFilter(f)} style={[styles.segBtn, on && styles.segBtnOn, alert && !on && styles.segBtnAlert]}>
+              <Text style={[styles.segText, on && styles.segTextOn]} numberOfLines={1}>{lbl.toUpperCase()}</Text>
+              <View style={[styles.segCount, on && styles.segCountOn, alert && !on && styles.segCountAlert]}><Text style={[styles.segCountText, (on || alert) && styles.segCountTextOn]}>{counts[f]}</Text></View>
             </Pressable>
           );
         })}
       </View>
-      {role === "manager" ? <FirstDeliveryControl defaultOpen={twoCol} /> : null}
+      <View style={styles.secondaryRow}>
+        <Pressable testID="staff-filter-done" onPress={() => setFilter("done")} style={[styles.doneLink, filter === "done" && styles.doneLinkOn]}>
+          <Feather name="archive" size={14} color={filter === "done" ? colors.onSurfaceInverse : colors.muted} />
+          <Text style={[styles.doneLinkText, filter === "done" && { color: colors.onSurfaceInverse }]}>{t("done")} · {counts.done}</Text>
+        </Pressable>
+      </View>
+      {role === "manager" ? <FirstDeliveryControl /> : null}
 
       {isLoading ? (
         <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} size="large" /></View>
@@ -174,18 +180,23 @@ const useStyles = makeStyles((colors) => ({
   alertText: { flex: 1, fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.onBrandPrimary },
   alertBtn: { backgroundColor: colors.onBrandPrimary, paddingHorizontal: 14, height: 36, borderRadius: 10, justifyContent: "center" },
   alertBtnText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "800", color: colors.brandPrimary },
-  segment: { flexDirection: "row", flexWrap: "wrap", gap: 6, margin: 12, marginBottom: 8, padding: 4, borderRadius: 16, backgroundColor: colors.surfaceTertiary },
-  segBtn: { flexGrow: 1, flexBasis: "45%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 44, borderRadius: 12, paddingHorizontal: 6 },
+  segment: { flexDirection: "row", gap: 6, marginHorizontal: 12, marginTop: 12, padding: 4, borderRadius: 16, backgroundColor: colors.surfaceTertiary },
+  segBtn: { flex: 1, flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, height: 60, borderRadius: 12, paddingHorizontal: 4 },
+  segCountAlert: { backgroundColor: colors.brandPrimary },
+  secondaryRow: { flexDirection: "row", justifyContent: "flex-end", paddingHorizontal: 12, paddingVertical: 6 },
+  doneLink: { flexDirection: "row", alignItems: "center", gap: 6, height: 32, paddingHorizontal: 12, borderRadius: 16 },
+  doneLinkOn: { backgroundColor: colors.surfaceInverse },
+  doneLinkText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.muted },
   segBtnOn: { backgroundColor: colors.surfaceInverse },
-  segBtnAlert: { borderWidth: 1.5, borderColor: colors.brandPrimary },
-  segText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.onSurface, flexShrink: 1 },
+  segBtnAlert: { borderWidth: 2, borderColor: colors.brandPrimary, backgroundColor: colors.brandSoft },
+  segText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "900", color: colors.onSurface, letterSpacing: 0.6 },
   segTextOn: { color: colors.onSurfaceInverse },
-  segCount: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary },
+  segCount: { minWidth: 26, height: 22, borderRadius: 11, paddingHorizontal: 8, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary },
   segCountOn: { backgroundColor: colors.brandPrimary },
   segCountText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.onSurface },
   segCountTextOn: { color: colors.onBrandPrimary },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  leftPane: { width: "34%", borderRightWidth: 1, borderRightColor: colors.border },
+  leftPane: { width: "52%", borderRightWidth: 1, borderRightColor: colors.border },
   rightPane: { flex: 1, backgroundColor: colors.surface },
   modal: { flex: 1, backgroundColor: colors.surface },
 }));

@@ -29,55 +29,104 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
   const styles = useStyles();
   const { colors } = useTheme();
   const { t } = useI18n();
+  const toast = useToast();
+  const action = useOrderAction();
+  const assign = useAssignDriver();
+  const { data: slots } = useDriverSlots();
   const pending = o.status === "pending";
+  const closed = o.status === "completed" || o.status === "cancelled";
   const requested = o.requested_time && o.requested_time !== "asap" ? o.requested_time : null;
   const scheduledLater = isScheduledLater(o);
+  const payLabel = o.payment_method === "cash" ? t("payCash") : o.payment_method === "terminal" ? t("payTerminal") : o.payment_method === "pay_at_pickup" ? t("payAtPickup") : t("payAtDelivery");
+  // Quick accept = the SAME "Accepter et confirmer" action as the detail (single backend path, one ticket on success)
+  const quickAccept = (body: { minutes?: number; time?: string }) => {
+    Haptics.selectionAsync().catch(() => {});
+    action.mutateAsync({ id: o.id, action: "accept", body })
+      .then(() => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {}))
+      .catch((e) => toast.show(e?.message || "Erreur", "error"));
+  };
+  const quickAssign = (d: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    assign.mutateAsync({ id: o.id, driver: d }).catch((e) => toast.show(e?.message || "Erreur", "error"));
+  };
+  const showDrivers = o.type === "delivery" && !pending && !closed && !["delivering", "delivered"].includes(o.status);
   return (
     <Pressable testID={`staff-order-card-${o.id}`} onPress={onPress} style={[styles.card, selected && styles.cardSelected, pending && styles.cardPending]}>
       {scheduledLater ? (
         <View style={styles.schedBanner} testID={`staff-card-scheduled-${o.id}`}>
           <Feather name="calendar" size={16} color={colors.onSurfaceInverse} />
-          <Text style={styles.schedBannerText}>{t("scheduled").toUpperCase()} · {fmtDay(o.requested_date!)} · {o.requested_time}</Text>
+          <Text style={styles.schedBannerText}>{t("scheduled").toUpperCase()} · {fmtDay(o.requested_date!)} · {o.requested_time} · {t("notForToday")}</Text>
         </View>
       ) : null}
+      {/* 1. Number + type + status */}
       <View style={styles.cardHead}>
         <Text style={styles.cardNum}>#{o.order_number}</Text>
+        <Text style={[styles.cardType, { color: o.type === "pickup" ? colors.success : colors.brandPrimary }]}>{o.type === "pickup" ? t("pickup").toUpperCase() : t("delivery").toUpperCase()}</Text>
+        <View style={{ flex: 1 }} />
         <Badge label={statusLabel(o.status, o.type, t)} tone={statusTone(o.status)} />
       </View>
+      {/* 2. Source / age / driver tags + times */}
       <View style={styles.tagRow}>
         <Badge label={sourceLabel(o.source, o.station)} tone={o.source === "telephone" ? "warning" : "inverse"} />
-        <Badge label={o.type === "pickup" ? t("pickup").toUpperCase() : t("delivery").toUpperCase()} tone={o.type === "pickup" ? "success" : "brand"} />
         {o.age_required ? <Badge label={`${o.age_required}+`} tone="warning" testID={`staff-card-age-${o.id}`} /> : null}
-        {o.driver ? <Badge label={`${o.driver}${o.driver_name ? ` — ${o.driver_name}` : ""}`} tone="neutral" /> : null}
+        <Text style={styles.cardTime}>{fmtTime(o.created_at)} · {elapsedMinutes(o.created_at)} min</Text>
+        <Text style={[styles.cardTime, { fontWeight: "900", color: o.estimated_ready_at ? colors.brandSecondary : requested ? colors.brandTertiary : colors.onSurface }]}>
+          {o.estimated_ready_at ? `✓ ${fmtTime(o.estimated_ready_at)}` : `→ ${scheduledLater ? `${fmtDay(o.requested_date!)} ` : ""}${requested ?? t("asap")}`}
+        </Text>
       </View>
-      <View style={styles.timeRow}>
-        <View style={styles.timeCell}>
-          <Text style={styles.timeCellLabel}>{t("mgrOrdered")}</Text>
-          <Text style={styles.timeCellValue}>{fmtTime(o.created_at)} <Text style={styles.timeCellSub}>· {elapsedMinutes(o.created_at)} min</Text></Text>
-        </View>
-        <View style={styles.timeCell}>
-          <Text style={styles.timeCellLabel}>{t("mgrRequested")}</Text>
-          <Text style={[styles.timeCellValue, requested && { color: colors.brandTertiary }]}>{scheduledLater ? `${fmtDay(o.requested_date!)} ` : ""}{requested ?? t("asap")}</Text>
-        </View>
-        {o.estimated_ready_at ? (
-          <View style={styles.timeCell}>
-            <Text style={styles.timeCellLabel}>{t("mgrConfirmed")}</Text>
-            <Text style={[styles.timeCellValue, { color: colors.brandSecondary }]}>{fmtTime(o.estimated_ready_at)}</Text>
-          </View>
-        ) : null}
-      </View>
+      {/* 3. Customer, address, items, total */}
       <View style={styles.cardBody}>
         <Text style={styles.cardCustomer} numberOfLines={1}>{o.customer.first_name} {o.customer.last_name} · {o.customer.phone}</Text>
         {o.address ? <Text style={styles.cardAddress} numberOfLines={1}>{o.address.street} {o.address.number}, {o.address.npa} {o.address.city}</Text> : null}
-        <Text style={styles.cardItems} numberOfLines={2}>{o.items.map((i) => `${i.quantity}x ${i.name.fr}${i.size ? ` ${i.size.label}` : ""}`).join(", ")}</Text>
-      </View>
-      <View style={styles.cardFoot}>
-        <Text style={styles.cardTotal}>{chf(o.total)}</Text>
-        <View style={[styles.cardCta, pending && styles.cardCtaPending]}>
-          <Text style={[styles.cardCtaText, pending && { color: colors.onBrandPrimary }]}>{pending ? t("acceptAndConfirm") : t("mgrTapToProcess")}</Text>
-          <Feather name="chevron-right" size={16} color={pending ? colors.onBrandPrimary : colors.onSurface} />
+        <Text style={styles.cardItems} numberOfLines={3}>{o.items.map((i) => `${i.quantity}x ${i.name.fr}${i.size ? ` ${i.size.label}` : ""}${i.half ? ` / ${i.half.name.fr}` : ""}`).join(", ")}</Text>
+        <View style={styles.cardTotalRow}>
+          <Text style={styles.cardTotal}>{chf(o.total)}</Text>
+          <Text style={styles.cardPay}>{payLabel.toUpperCase()}{o.payment_collected ? " ✓" : ""}</Text>
         </View>
       </View>
+      {/* 4. Quick actions – pending: accept in one tap (existing accept endpoint → one ticket) */}
+      {pending ? (
+        <View style={styles.quickRow} testID={`staff-quick-accept-${o.id}`}>
+          {requested ? (
+            <Pressable testID={`staff-quick-confirm-${o.id}`} disabled={action.isPending} onPress={() => quickAccept({ time: requested })} style={[styles.quickBtn, styles.quickBtnConfirm, { flexBasis: "100%" }]}>
+              <Feather name="check-circle" size={20} color={colors.onSuccess} />
+              <Text style={styles.quickBtnText}>{t("confirm").toUpperCase()} {requested}</Text>
+            </Pressable>
+          ) : null}
+          {!scheduledLater ? [15, 20, 30].map((m) => (
+            <Pressable key={m} testID={`staff-quick-${m}-${o.id}`} disabled={action.isPending} onPress={() => quickAccept({ minutes: m })} style={[styles.quickBtn, action.isPending && { opacity: 0.5 }]}>
+              <Text style={styles.quickBtnBig}>{m}</Text>
+              <Text style={styles.quickBtnUnit}>MIN</Text>
+            </Pressable>
+          )) : null}
+          <Pressable testID={`staff-quick-other-${o.id}`} onPress={onPress} style={[styles.quickBtn, styles.quickBtnOther]}>
+            <Feather name="clock" size={18} color={colors.onSurface} />
+            <Text style={[styles.quickBtnText, { color: colors.onSurface }]}>{t("customTime").toUpperCase()}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {/* 5. Delivery: driver buttons right on the card (real shift names) */}
+      {showDrivers ? (
+        o.driver ? (
+          <View style={styles.assignedRow} testID={`staff-card-assigned-${o.id}`}>
+            <Feather name="check-circle" size={20} color={colors.onSuccess} />
+            <Text style={styles.assignedText}>✓ {(o.driver_name || o.driver).toUpperCase()} — ASSIGNÉ</Text>
+            <Text style={styles.assignedSub}>{o.driver}</Text>
+          </View>
+        ) : (
+          <View style={styles.quickRow} testID={`staff-quick-drivers-${o.id}`}>
+            {DRIVERS.map((d) => {
+              const slot = slots?.find((s) => s.driver === d);
+              return (
+                <Pressable key={d} testID={`staff-quick-assign-${d.slice(-1)}-${o.id}`} disabled={assign.isPending} onPress={() => quickAssign(d)} style={[styles.quickBtn, styles.driverQuick, slot && !slot.open && { opacity: 0.45 }]}>
+                  <Text style={styles.quickBtnBig} numberOfLines={1}>{(slot?.name || d).toUpperCase()}</Text>
+                  <Text style={styles.quickBtnUnit}>{slot?.open ? d : t("mgrShiftClosed")}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )
+      ) : null}
     </Pressable>
   );
 }
@@ -181,7 +230,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
       <View style={[styles.timeBox, pending && { backgroundColor: colors.warningSoft }]}>
         <View style={{ flex: 1 }}>
           <Text style={styles.timeLabel}>{o.type === "pickup" ? t("requestedPickup") : t("requestedDelivery")}</Text>
-          <Text style={styles.timeValue} testID="staff-requested-time">{requested ?? t("asap")}</Text>
+          <Text style={styles.timeValue} numberOfLines={1} adjustsFontSizeToFit testID="staff-requested-time">{requested ?? t("asap")}</Text>
         </View>
         {o.estimated_ready_at ? (
           <View style={{ flex: 1, alignItems: "flex-end" }}>
@@ -370,6 +419,21 @@ const useStyles = makeStyles((colors) => ({
   cardPending: { borderColor: colors.brandPrimary, backgroundColor: colors.brandSoft },
   cardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   cardNum: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurface },
+  cardType: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "900", letterSpacing: 0.8 },
+  cardTime: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "600", color: colors.muted },
+  cardTotalRow: { flexDirection: "row", alignItems: "baseline", gap: 10, marginTop: 4 },
+  cardPay: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "800", color: colors.brandSecondary, letterSpacing: 0.5 },
+  quickRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: 10 },
+  quickBtn: { flexGrow: 1, flexBasis: "22%", minHeight: 64, borderRadius: 14, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, paddingHorizontal: 8 },
+  quickBtnConfirm: { backgroundColor: colors.success, minHeight: 56 },
+  quickBtnOther: { backgroundColor: colors.surfaceTertiary },
+  driverQuick: { backgroundColor: colors.brandSecondary, flexDirection: "column", gap: 0, flexBasis: "30%" },
+  quickBtnBig: { fontFamily: FONT_DISPLAY, fontSize: 24, color: colors.onSurfaceInverse },
+  quickBtnUnit: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "800", color: colors.onSurfaceInverse, opacity: 0.85 },
+  quickBtnText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "900", color: colors.onSuccess, letterSpacing: 0.4 },
+  assignedRow: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.success, borderRadius: 12, paddingHorizontal: 12, minHeight: 48 },
+  assignedText: { flex: 1, fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "900", color: colors.onSuccess, letterSpacing: 0.4 },
+  assignedSub: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "700", color: colors.onSuccess, opacity: 0.85 },
   tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" },
   timeRow: { flexDirection: "row", gap: 8, backgroundColor: colors.surfaceTertiary, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
   timeCell: { flex: 1, minWidth: 0 },

@@ -103,6 +103,11 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Nothing prints on startup/restart/polling/notifications: no code path other than accept/manual print calls `do_print`.
 - Tests: `tests/scenario_print_rule.py` (manual, deletes its orders, accept test uses printed=True pre-flag → no PrintNode job).
 
+## Iteration 13 (2026-06) – Manager service mode (UI only)
+- Order card carries the two operational taps: pending → `15 | 20 | 30 MIN` (+ "Confirmer HH:MM" when a time was requested, + "Heure exacte" → opens detail) calling the SAME accept mutation (`POST /orders/{id}/accept`, one ticket); accepted delivery → driver buttons with real shift names (`GET /auth/staff/drivers`), one tap = `POST /orders/{id}/assign` (never prints); assigned → "✓ ALIOU — ASSIGNÉ · Livreur 1". Pickup cards never show driver controls. Card shows #, type, source, times, customer, address, items, total + payment.
+- Filters: NOUVELLES | EN COURS | PROGRAMMÉES (large, alert highlight), "Terminées · n" as a secondary link. Tablet: list pane 52% so cards + buttons stay wide, detail on the right. Detail keeps Annuler / Retard / Réimprimer / customer info.
+- Verified with pre-flagged (printed=True) preview orders → 0 PrintNode jobs; previews removed.
+
 ## Backlog
 - P0: PrintNode live credentials + real ESC/POS ticket test on Epson TM-T70II; staff PIN protection.
 - P1: real push notifications (Emergent push after build), favourites + one-tap reorder for account holders, dedicated driver view (age-check warning already in staff detail), web layout polish for desktop widths, category manager UI, extras per-size pricing.
