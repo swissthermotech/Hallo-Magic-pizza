@@ -19,33 +19,53 @@ export function sourceLabel(src: string, station?: number | null) {
 }
 const DRIVERS = ["Livreur 1", "Livreur 2", "Livreur 3"];
 
-/** Compact order card for the queue list */
+/** Compact order card for the queue list – one clearly separated block per order:
+ *  1) number + status  2) source / type / age tags  3) times  4) customer  5) items  6) total + action hint */
 export function OrderCard({ order: o, selected, onPress }: { order: Order; selected?: boolean; onPress: () => void }) {
   const styles = useStyles();
   const { colors } = useTheme();
   const { t } = useI18n();
   const pending = o.status === "pending";
+  const requested = o.requested_time && o.requested_time !== "asap" ? o.requested_time : null;
   return (
     <Pressable testID={`staff-order-card-${o.id}`} onPress={onPress} style={[styles.card, selected && styles.cardSelected, pending && styles.cardPending]}>
       <View style={styles.cardHead}>
         <Text style={styles.cardNum}>#{o.order_number}</Text>
-        <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-          {o.age_required ? <Badge label={`${o.age_required}+`} tone="warning" testID={`staff-card-age-${o.id}`} /> : null}
-          <Badge label={sourceLabel(o.source, o.station)} tone={o.source === "telephone" ? "warning" : "inverse"} />
-          <Badge label={o.type === "pickup" ? t("pickup").toUpperCase() : t("delivery").toUpperCase()} tone={o.type === "pickup" ? "success" : "brand"} />
-        </View>
-      </View>
-      <View style={styles.cardMeta}>
-        <Feather name="clock" size={13} color={colors.muted} />
-        <Text style={styles.cardMetaText}>{fmtTime(o.created_at)} · {elapsedMinutes(o.created_at)} min</Text>
-        {o.requested_time && o.requested_time !== "asap" ? <Text style={[styles.cardMetaText, { color: colors.brandTertiary, fontWeight: "800" }]}>→ {o.requested_time}</Text> : null}
-        {o.estimated_ready_at ? <Text style={[styles.cardMetaText, { color: colors.brandSecondary, fontWeight: "800" }]}>✓ {fmtTime(o.estimated_ready_at)}</Text> : null}
-      </View>
-      <Text style={styles.cardCustomer}>{o.customer.first_name} {o.customer.last_name} · {o.customer.phone}</Text>
-      <Text style={styles.cardItems} numberOfLines={2}>{o.items.map((i) => `${i.quantity}x ${i.name.fr}${i.size ? ` ${i.size.label}` : ""}`).join(", ")}</Text>
-      <View style={styles.cardFoot}>
         <Badge label={statusLabel(o.status, o.type, t)} tone={statusTone(o.status)} />
+      </View>
+      <View style={styles.tagRow}>
+        <Badge label={sourceLabel(o.source, o.station)} tone={o.source === "telephone" ? "warning" : "inverse"} />
+        <Badge label={o.type === "pickup" ? t("pickup").toUpperCase() : t("delivery").toUpperCase()} tone={o.type === "pickup" ? "success" : "brand"} />
+        {o.age_required ? <Badge label={`${o.age_required}+`} tone="warning" testID={`staff-card-age-${o.id}`} /> : null}
+        {o.driver ? <Badge label={`${o.driver}${o.driver_name ? ` — ${o.driver_name}` : ""}`} tone="neutral" /> : null}
+      </View>
+      <View style={styles.timeRow}>
+        <View style={styles.timeCell}>
+          <Text style={styles.timeCellLabel}>{t("mgrOrdered")}</Text>
+          <Text style={styles.timeCellValue}>{fmtTime(o.created_at)} <Text style={styles.timeCellSub}>· {elapsedMinutes(o.created_at)} min</Text></Text>
+        </View>
+        <View style={styles.timeCell}>
+          <Text style={styles.timeCellLabel}>{t("mgrRequested")}</Text>
+          <Text style={[styles.timeCellValue, requested && { color: colors.brandTertiary }]}>{requested ?? t("asap")}</Text>
+        </View>
+        {o.estimated_ready_at ? (
+          <View style={styles.timeCell}>
+            <Text style={styles.timeCellLabel}>{t("mgrConfirmed")}</Text>
+            <Text style={[styles.timeCellValue, { color: colors.brandSecondary }]}>{fmtTime(o.estimated_ready_at)}</Text>
+          </View>
+        ) : null}
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardCustomer} numberOfLines={1}>{o.customer.first_name} {o.customer.last_name} · {o.customer.phone}</Text>
+        {o.address ? <Text style={styles.cardAddress} numberOfLines={1}>{o.address.street} {o.address.number}, {o.address.npa} {o.address.city}</Text> : null}
+        <Text style={styles.cardItems} numberOfLines={2}>{o.items.map((i) => `${i.quantity}x ${i.name.fr}${i.size ? ` ${i.size.label}` : ""}`).join(", ")}</Text>
+      </View>
+      <View style={styles.cardFoot}>
         <Text style={styles.cardTotal}>{chf(o.total)}</Text>
+        <View style={[styles.cardCta, pending && styles.cardCtaPending]}>
+          <Text style={[styles.cardCtaText, pending && { color: colors.onBrandPrimary }]}>{pending ? t("acceptAndConfirm") : t("mgrTapToProcess")}</Text>
+          <Feather name="chevron-right" size={16} color={pending ? colors.onBrandPrimary : colors.onSurface} />
+        </View>
       </View>
     </Pressable>
   );
@@ -118,16 +138,21 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
 
   return (
     <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: 40 }} testID="staff-order-detail">
-      {/* Header */}
+      {/* Header: number + close, then one tag row (status / source / type / driver) */}
       <View style={styles.detailHead}>
         <View style={{ flex: 1 }}>
           <Text style={styles.detailNum} testID="staff-detail-number">#{o.order_number}</Text>
-          <Text style={styles.detailMeta}>{fmtTime(o.created_at)} · {sourceLabel(o.source, o.station)} · {o.type === "pickup" ? t("pickup") : t("delivery")}{o.driver ? ` · ${o.driver}` : ""}</Text>
+          <Text style={styles.detailMeta}>{t("mgrOrdered")} {fmtTime(o.created_at)} · {elapsedMinutes(o.created_at)} min</Text>
         </View>
-        <Badge label={statusLabel(o.status, o.type, t)} tone={statusTone(o.status)} testID="staff-detail-status" />
         {onClose ? (
-          <Pressable testID="staff-detail-close" onPress={onClose} style={styles.closeBtn}><Feather name="x" size={20} color={colors.onSurface} /></Pressable>
+          <Pressable testID="staff-detail-close" onPress={onClose} style={styles.closeBtn}><Feather name="x" size={22} color={colors.onSurface} /></Pressable>
         ) : null}
+      </View>
+      <View style={styles.tagRow}>
+        <Badge label={statusLabel(o.status, o.type, t)} tone={statusTone(o.status)} testID="staff-detail-status" />
+        <Badge label={sourceLabel(o.source, o.station)} tone={o.source === "telephone" ? "warning" : "inverse"} />
+        <Badge label={o.type === "pickup" ? t("pickup").toUpperCase() : t("delivery").toUpperCase()} tone={o.type === "pickup" ? "success" : "brand"} />
+        {o.driver ? <Badge label={`${o.driver}${o.driver_name ? ` — ${o.driver_name}` : ""}`} tone="neutral" testID="staff-detail-driver" /> : null}
       </View>
 
       {/* Time block */}
@@ -158,6 +183,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
 
       {/* Customer */}
       <View style={styles.box}>
+        <Text style={styles.sectionLabel}>{t("mgrCustomer")}</Text>
         <Text style={styles.boxTitle}>{o.customer.first_name} {o.customer.last_name}{o.user_id ? "  ·  ★" : ""}</Text>
         <Text style={styles.boxText}>{o.customer.phone}{o.customer.email ? ` · ${o.customer.email}` : ""}</Text>
         {o.address ? <Text style={styles.boxText}>{o.address.street} {o.address.number}, {o.address.npa} {o.address.city}{o.address.instructions ? `\n${o.address.instructions}` : ""}</Text> : null}
@@ -165,18 +191,22 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
 
       {/* Lines */}
       <View style={styles.box}>
+        <Text style={styles.sectionLabel}>{t("mgrItems")} · {o.items.reduce((n, i) => n + i.quantity, 0)}</Text>
         <OrderLines items={o.items} size="lg" lang="fr" />
         {o.general_note ? <Text style={styles.generalNote}>NOTE: {o.general_note}</Text> : null}
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>{t("total")}{o.delivery_fee > 0 ? ` (${t("deliveryFee").toLowerCase()} ${chf(o.delivery_fee)})` : ""}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.totalLabel}>{t("total")}{o.delivery_fee > 0 ? ` (${t("deliveryFee").toLowerCase()} ${chf(o.delivery_fee)})` : ""}</Text>
+            <Text style={styles.pay}>{o.payment_method === "cash" ? t("payCash").toUpperCase() : o.payment_method === "terminal" ? t("payTerminal").toUpperCase() : o.payment_method === "pay_at_pickup" ? t("payAtPickup").toUpperCase() : t("payAtDelivery").toUpperCase()}</Text>
+          </View>
           <Text style={styles.totalValue} testID="staff-detail-total">{chf(o.total)}</Text>
         </View>
-        <Text style={styles.pay}>{o.payment_method === "cash" ? t("payCash").toUpperCase() : o.payment_method === "terminal" ? t("payTerminal").toUpperCase() : o.payment_method === "pay_at_pickup" ? t("payAtPickup").toUpperCase() : t("payAtDelivery").toUpperCase()}</Text>
       </View>
 
       {/* Actions */}
       {pending ? (
-        <View style={{ gap: 12 }}>
+        <View style={[styles.box, styles.actionBox]}>
+          <Text style={styles.sectionLabel}>{t("mgrAcceptOrder")}</Text>
           <Text style={styles.actionLabel}>1 · {requested ? `${t("confirm")} ${requested} / ${t("changeTo")}` : t("estimatedPrep")}</Text>
           {requested ? (
             <Pressable testID="staff-confirm-requested-time" onPress={() => pick({ time: requested })} style={[styles.minuteBtn, { width: "100%", flexDirection: "row", gap: 10 }, isSel({ time: requested }) && styles.minuteBtnSel]}>
@@ -212,7 +242,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
             <Button title={t("reject")} size="lg" icon="x-circle" variant="danger" onPress={() => setShowReject(true)} testID="staff-reject-button" />
           ) : (
             <View style={{ gap: 10 }}>
-              <TextInput testID="staff-reject-reason" value={rejectReason} onChangeText={setRejectReason} placeholder={t("rejectReason")} placeholderTextColor={colors.muted} style={styles.customInput} />
+              <TextInput testID="staff-reject-reason" value={rejectReason} onChangeText={setRejectReason} placeholder={t("rejectReason")} placeholderTextColor={colors.muted} style={[styles.customInput, { width: "100%", textAlign: "left" }]} />
               <View style={{ flexDirection: "row", gap: 10 }}>
                 <Button title={t("close")} variant="outline" onPress={() => setShowReject(false)} style={{ flex: 1 }} testID="staff-reject-cancel" />
                 <Button title={t("reject")} variant="danger" size="lg" loading={action.isPending} onPress={() => run("reject", { reason: rejectReason.trim() || undefined }, "error")} style={{ flex: 2 }} testID="staff-reject-confirm" />
@@ -222,22 +252,19 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
         </View>
       ) : !closed ? (
         <View style={{ gap: 12 }}>
-          <Text style={styles.actionLabel}>{t("delayNotice")}</Text>
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            {[5, 10, 15].map((m) => (
-              <Pressable key={m} testID={`staff-delay-${m}`} disabled={action.isPending} onPress={() => run("delay", { minutes: m }, "warning")} style={[styles.minuteBtn, styles.delayBtn, { flex: 1 }]}>
-                <Text style={[styles.minuteText, { color: colors.onWarning }]}>+{m}</Text>
-                <Text style={[styles.minuteUnit, { color: colors.onWarning }]}>min</Text>
-              </Pressable>
-            ))}
-          </View>
-          <View style={styles.customRow}>
-            <TextInput testID="staff-delay-time-input" value={customTime} onChangeText={setCustomTime} placeholder="20:15" placeholderTextColor={colors.muted} style={styles.customInput} keyboardType="numbers-and-punctuation" />
-            <Button title={t("customTime")} variant="secondary" disabled={!validTime} onPress={() => run("delay", { time: customTime.trim() }, "warning")} style={{ flex: 1 }} testID="staff-delay-custom-time" />
-          </View>
+          {/* 1. Next step – the primary action */}
+          {nextSteps.length ? (
+            <View style={[styles.box, styles.actionBox]}>
+              <Text style={styles.sectionLabel}>{t("mgrNextStep")}</Text>
+              {nextSteps.map((s) => (
+                <Button key={s.status} title={s.label} size="xl" icon={s.icon} variant={s.status === "completed" ? "primary" : "success"} loading={action.isPending} onPress={() => run("status", { status: s.status })} testID={`staff-status-${s.status}`} />
+              ))}
+            </View>
+          ) : null}
+          {/* 2. Driver assignment (delivery only) */}
           {o.type === "delivery" ? (
-            <View style={{ gap: 8 }}>
-              <Text style={styles.actionLabel}>{t("assignDriver")}{o.driver ? ` · ${o.driver}` : ""}</Text>
+            <View style={styles.box}>
+              <Text style={styles.sectionLabel}>{t("mgrDriver")}{o.driver ? ` · ${o.driver}${o.driver_name ? ` — ${o.driver_name}` : ""}` : ""}</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 {DRIVERS.map((d) => (
                   <Button key={d} title={d} variant={o.driver === d ? "success" : "outline"} onPress={() => assign.mutateAsync({ id: o.id, driver: d }).catch((e) => toast.show(e.message, "error"))} style={{ flex: 1 }} testID={`staff-assign-${d.slice(-1)}`} />
@@ -245,55 +272,80 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
               </View>
             </View>
           ) : null}
-          {nextSteps.map((s) => (
-            <Button key={s.status} title={s.label} size="xl" icon={s.icon} variant={s.status === "completed" ? "primary" : "success"} loading={action.isPending} onPress={() => run("status", { status: s.status })} testID={`staff-status-${s.status}`} />
-          ))}
-          <Button title={t("reject")} variant="outline" icon="x-circle" onPress={() => run("reject", {}, "error")} testID="staff-cancel-order" />
+          {/* 3. Delay (customer is notified) */}
+          <View style={styles.box}>
+            <Text style={styles.sectionLabel}>{t("mgrDelay")}{o.estimated_ready_at ? ` · ${t("confirmedTime").toLowerCase()} ${fmtTime(o.estimated_ready_at)}` : ""}</Text>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              {[5, 10, 15].map((m) => (
+                <Pressable key={m} testID={`staff-delay-${m}`} disabled={action.isPending} onPress={() => run("delay", { minutes: m }, "warning")} style={[styles.minuteBtn, styles.delayBtn, { flex: 1, height: 56 }]}>
+                  <Text style={[styles.minuteText, { color: colors.onWarning, fontSize: 22 }]}>+{m}</Text>
+                  <Text style={[styles.minuteUnit, { color: colors.onWarning }]}>min</Text>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.customRow}>
+              <TextInput testID="staff-delay-time-input" value={customTime} onChangeText={setCustomTime} placeholder="20:15" placeholderTextColor={colors.muted} style={styles.customInput} keyboardType="numbers-and-punctuation" />
+              <Button title={t("customTime")} variant="secondary" disabled={!validTime} onPress={() => run("delay", { time: customTime.trim() }, "warning")} style={{ flex: 1 }} testID="staff-delay-custom-time" />
+            </View>
+          </View>
+          {/* 4. Cancel – kept apart from the positive actions */}
+          <Button title={t("mgrCancelOrder")} variant="outline" icon="x-circle" onPress={() => run("reject", {}, "error")} testID="staff-cancel-order" />
         </View>
       ) : null}
 
       {/* Ticket */}
       <View style={styles.box}>
+        <Text style={styles.sectionLabel}>{t("mgrTicket")}</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
           <Feather name="printer" size={18} color={o.printed ? colors.success : colors.muted} />
           <Text style={[styles.boxText, { flex: 1 }]} testID="staff-print-status">
             {o.print_status === "failed" ? `⚠ ${t("printFailed")} · ${o.print_attempts}x` : o.printed ? `${t("printed")} ${fmtTime(o.printed_at)} · ${o.print_attempts}x${o.print_status ? ` · ${o.print_status}` : ""}` : t("notPrinted")}
           </Text>
         </View>
-        <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-          <Button title={t("ticketPreview")} variant="outline" icon="file-text" onPress={openTicket} style={{ flex: 1 }} testID="staff-ticket-preview" />
+        <View style={{ gap: 10, marginTop: 6 }}>
           <Button
             title={o.print_status === "failed" ? t("retryPrint") : o.printed ? t("reprintTicket") : t("printTicket")}
             variant="secondary"
             icon="printer"
             loading={print.isPending}
             onPress={() => print.mutateAsync({ id: o.id, force: o.printed }).then(() => toast.show(t("printed"), "success")).catch((e) => toast.show(e.message, "error"))}
-            style={{ flex: 1 }}
             testID="staff-print-button"
           />
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Button title={t("ticketPreview")} variant="outline" icon="file-text" onPress={openTicket} style={{ flex: 1 }} testID="staff-ticket-preview" />
+            <Button title={`${t("receiptPreview")}${o.receipt_printed ? ` · ${o.receipt_print_attempts}x` : ""}`} variant="outline" icon="file" onPress={openReceipt} style={{ flex: 1 }} testID="staff-receipt-preview" />
+          </View>
         </View>
-        <Button title={`${t("receiptPreview")}${o.receipt_printed ? ` · ${t("printed")} ${o.receipt_print_attempts}x` : ""}`} variant="outline" icon="file" onPress={openReceipt} style={{ marginTop: 10 }} testID="staff-receipt-preview" />
       </View>
     </ScrollView>
   );
 }
 
 const useStyles = makeStyles((colors) => ({
-  card: { backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1.5, borderColor: colors.border, padding: 14, gap: 6 },
+  card: { backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1.5, borderColor: colors.border, padding: 14, gap: 10 },
   cardSelected: { borderColor: colors.surfaceInverse },
   cardPending: { borderColor: colors.brandPrimary, backgroundColor: colors.brandSoft },
-  cardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  cardNum: { fontFamily: FONT_DISPLAY, fontSize: 24, color: colors.onSurface },
-  cardMeta: { flexDirection: "row", gap: 8, alignItems: "center" },
-  cardMetaText: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },
-  cardCustomer: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "700", color: colors.onSurface },
-  cardItems: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.onSurfaceSecondary, lineHeight: 18 },
-  cardFoot: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 },
-  cardTotal: { fontFamily: FONT_TEXT, fontSize: 16, fontWeight: "800", color: colors.onSurface },
+  cardHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
+  cardNum: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurface },
+  tagRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" },
+  timeRow: { flexDirection: "row", gap: 8, backgroundColor: colors.surfaceTertiary, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8 },
+  timeCell: { flex: 1, minWidth: 0 },
+  timeCellLabel: { fontFamily: FONT_TEXT, fontSize: 10, fontWeight: "800", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
+  timeCellValue: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.onSurface, marginTop: 1 },
+  timeCellSub: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "600", color: colors.muted },
+  cardBody: { gap: 2 },
+  cardCustomer: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "700", color: colors.onSurface },
+  cardAddress: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },
+  cardItems: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.onSurfaceSecondary, lineHeight: 18, marginTop: 2 },
+  cardFoot: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: 10 },
+  cardTotal: { fontFamily: FONT_DISPLAY, fontSize: 20, color: colors.onSurface },
+  cardCta: { flexDirection: "row", alignItems: "center", gap: 4, height: 36, paddingLeft: 12, paddingRight: 6, borderRadius: 18, backgroundColor: colors.surfaceTertiary },
+  cardCtaPending: { backgroundColor: colors.brandPrimary },
+  cardCtaText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.onSurface, textTransform: "uppercase", letterSpacing: 0.4 },
   detailHead: { flexDirection: "row", alignItems: "center", gap: 12 },
   detailNum: { fontFamily: FONT_DISPLAY, fontSize: 34, color: colors.onSurface },
   detailMeta: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },
-  closeBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
+  closeBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   timeBox: { flexDirection: "row", backgroundColor: colors.surfaceTertiary, borderRadius: 14, padding: 14 },
   timeLabel: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   timeValue: { fontFamily: FONT_DISPLAY, fontSize: 30, color: colors.onSurface, marginTop: 2 },
@@ -301,14 +353,16 @@ const useStyles = makeStyles((colors) => ({
   ageBox: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.warning, borderRadius: 14, padding: 14 },
   ageTitle: { fontFamily: FONT_TEXT, fontSize: 17, fontWeight: "900", color: colors.onWarning, letterSpacing: 0.4 },
   ageSub: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "600", color: colors.onWarning, opacity: 0.9, marginTop: 2 },
-  box: { backgroundColor: colors.surfaceSecondary, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 4 },
+  box: { backgroundColor: colors.surfaceSecondary, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 8 },
+  actionBox: { borderColor: colors.borderStrong, borderWidth: 1.5 },
+  sectionLabel: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "800", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 2 },
   boxTitle: { fontFamily: FONT_TEXT, fontSize: 18, fontWeight: "800", color: colors.onSurface },
   boxText: { fontFamily: FONT_TEXT, fontSize: 15, color: colors.onSurfaceSecondary, lineHeight: 21 },
   generalNote: { fontFamily: FONT_TEXT, fontSize: 16, color: colors.warning, fontWeight: "800", marginTop: 10 },
-  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 12, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: 10 },
+  totalRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 12, borderTopWidth: 1, borderTopColor: colors.divider, paddingTop: 10 },
   totalLabel: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.muted },
   totalValue: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurface },
-  pay: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.brandSecondary, letterSpacing: 0.5 },
+  pay: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.brandSecondary, letterSpacing: 0.5, marginTop: 2 },
   actionLabel: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   minuteGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   minuteBtn: { width: "30%", flexGrow: 1, height: 64, borderRadius: 14, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: colors.surfaceInverse },
@@ -317,5 +371,5 @@ const useStyles = makeStyles((colors) => ({
   minuteText: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurfaceInverse },
   minuteUnit: { fontFamily: FONT_TEXT, fontSize: 11, color: colors.onSurfaceInverse, opacity: 0.8 },
   customRow: { flexDirection: "row", gap: 10, alignItems: "center" },
-  customInput: { height: 48, minWidth: 100, borderRadius: 12, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, fontFamily: FONT_TEXT, fontSize: 18, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
+  customInput: { height: 48, width: 110, borderRadius: 12, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, fontFamily: FONT_TEXT, fontSize: 18, fontWeight: "700", color: colors.onSurface, textAlign: "center" },
 }));

@@ -2,6 +2,9 @@
 import os
 import pytest
 import requests
+import sys, os as _os
+sys.path.insert(0, _os.path.dirname(__file__))
+from helpers import driver_pin
 
 API = os.environ.get("API_URL", "http://localhost:8001/api")
 
@@ -45,8 +48,8 @@ def test_driver_flow_no_pickup_step_and_auto_complete(H, menu):
             "items": [{"product_id": menu["Margherita"]["id"], "quantity": 2, "size_key": "32"}],
             "customer": {"first_name": c["first_name"], "phone": c["phone"]}, "address": c["addresses"][0], "requested_time": "asap"}
     o = requests.post(f"{API}/phone-orders", json=body, headers=H).json()
+    d1 = {"Authorization": f"Bearer {login(driver_pin('driver1')).json()['access_token']}"}  # opens the shift first
     assert requests.post(f"{API}/orders/{o['id']}/assign", json={"driver": "Livreur 1"}, headers=H).status_code == 200
-    d1 = {"Authorization": f"Bearer {login('1111').json()['access_token']}"}
     mine = requests.get(f"{API}/driver/orders", headers=d1).json()
     assert any(x["id"] == o["id"] for x in mine)
     # assigned -> directly PARTI (no pickup call)
@@ -64,7 +67,7 @@ def test_driver_flow_no_pickup_step_and_auto_complete(H, menu):
 
 
 def test_driver_sees_only_today(H):
-    d2 = {"Authorization": f"Bearer {login('2222').json()['access_token']}"}
+    d2 = {"Authorization": f"Bearer {login(driver_pin('driver2')).json()['access_token']}"}
     from datetime import datetime, timezone, timedelta
     start_utc = datetime.now(timezone.utc) - timedelta(hours=26)
     for o in requests.get(f"{API}/driver/orders", headers=d2).json():
@@ -85,31 +88,3 @@ def test_pickup_retiree_auto_completes(H, menu):
         assert r.status_code == 200, r.text
     assert r.json()["status"] == "completed"
     assert [e["status"] for e in r.json()["status_history"]][-2:] == ["picked_up", "completed"]
-
-
-def test_inactive_driver_position_cannot_login(H):
-    try:
-        assert requests.put(f"{API}/auth/staff/drivers/driver3/active", json={"active": False}, headers=H).status_code == 200
-        r = login("3333")
-        assert r.status_code == 403 and "INACTIF" in r.text
-        # kitchen (non-driver) unaffected, cannot toggle
-        assert requests.put(f"{API}/auth/staff/drivers/driver3/active", json={"active": True}, headers={"Authorization": f"Bearer {login('2345').json()['access_token']}"}).status_code == 403
-    finally:
-        requests.put(f"{API}/auth/staff/drivers/driver3/active", json={"active": True}, headers=H)
-    r = login("3333")
-    assert r.status_code == 200 and r.json()["role"] == "driver3"
-
-
-def test_deactivation_cuts_existing_session_and_session_expires_end_of_day(H):
-    import jwt
-    from datetime import datetime, timezone, timedelta
-    tok = login("3333").json()["access_token"]
-    exp = datetime.fromtimestamp(jwt.decode(tok, options={"verify_signature": False})["exp"], tz=timezone.utc)
-    assert exp <= datetime.now(timezone.utc) + timedelta(hours=27)  # ends at 03:00 Zurich at the latest
-    d3 = {"Authorization": f"Bearer {tok}"}
-    assert requests.get(f"{API}/driver/orders", headers=d3).status_code == 200
-    try:
-        requests.put(f"{API}/auth/staff/drivers/driver3/active", json={"active": False}, headers=H)
-        assert requests.get(f"{API}/driver/orders", headers=d3).status_code == 403
-    finally:
-        requests.put(f"{API}/auth/staff/drivers/driver3/active", json={"active": True}, headers=H)

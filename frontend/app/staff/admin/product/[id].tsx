@@ -30,7 +30,7 @@ export default function ProductEditor() {
   const del = useDeleteProduct();
   const product = data?.products.find((p) => p.id === id);
 
-  const [f, setF] = useState({ nameFr: "", nameDe: "", descFr: "", descDe: "", price: "", image: "", category: "", allergFr: "", allergDe: "", ingredients: "", sizes: "" });
+  const [f, setF] = useState({ nameFr: "", nameDe: "", descFr: "", descDe: "", price: "", image: "", category: "", allergFr: "", allergDe: "", originFr: "", originDe: "", ingredients: "", sizes: "" });
   const [available, setAvailable] = useState(true);
   const [customizable, setCustomizable] = useState(false);
   const [isAlcohol, setIsAlcohol] = useState(false);
@@ -47,7 +47,7 @@ export default function ProductEditor() {
       setF({
         nameFr: product.name.fr, nameDe: product.name.de, descFr: product.description.fr, descDe: product.description.de,
         price: String(product.price), image: product.image_url || "", category: product.category_id,
-        allergFr: product.allergens.fr, allergDe: product.allergens.de,
+        allergFr: product.allergens.fr, allergDe: product.allergens.de, originFr: product.origin?.fr ?? "", originDe: product.origin?.de ?? "",
         ingredients: product.ingredients.map((i) => `${i.fr} | ${i.de}`).join("\n"),
         sizes: product.sizes.map((s) => `${s.key} | ${s.label} | ${s.price}`).join("\n"),
       });
@@ -91,6 +91,7 @@ export default function ProductEditor() {
       image_url: f.image.trim() || null,
       images: extraPhotos,
       allergens: { fr: f.allergFr, de: f.allergDe },
+      origin: { fr: f.originFr, de: f.originDe },
       ingredients,
       sizes,
       options: pizzaOptions ? (product?.options.length ? product.options : DOUGH_TEMPLATE) : [],
@@ -151,6 +152,8 @@ export default function ProductEditor() {
         <Text style={styles.section}>{t("ingredients")}</Text>
         <Field label={t("ingredientsList")} value={f.ingredients} onChangeText={set("ingredients")} multiline placeholder={"tomate | Tomaten\nmozzarella | Mozzarella"} testID="editor-ingredients" />
         <Field label={`${t("allergens")} (FR)`} value={f.allergFr} onChangeText={set("allergFr")} testID="editor-allergens-fr" />
+        <Field label={`${t("origin")} (FR)`} value={f.originFr} onChangeText={set("originFr")} placeholder="ex. Jambon: Suisse" testID="editor-origin-fr" />
+        <Field label={`${t("origin")} (DE)`} value={f.originDe} onChangeText={set("originDe")} testID="editor-origin-de" />
         <Field label={`${t("allergens")} (DE)`} value={f.allergDe} onChangeText={set("allergDe")} testID="editor-allergens-de" />
 
         <SwitchRow label={t("availableSwitch")} value={available} onChange={setAvailable} testID="editor-available" />

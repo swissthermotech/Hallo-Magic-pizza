@@ -190,7 +190,8 @@ export default function ProductScreen() {
 
           <View style={styles.allergenBox}>
             <Feather name="info" size={14} color={colors.muted} />
-            <Text style={styles.allergenText}>{t("allergens")}: {tx(product.allergens) || "—"}</Text>
+            <Text style={styles.allergenText}>{t("allergens")}: {tx(product.allergens) || t("notConfigured")}</Text>
+            {tx(product.origin) ? <Text style={styles.allergenText} testID="product-origin">{t("origin")}: {tx(product.origin)}</Text> : null}
           </View>
 
           {/* Sizes */}

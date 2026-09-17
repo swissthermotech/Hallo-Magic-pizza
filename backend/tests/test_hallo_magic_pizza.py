@@ -204,10 +204,10 @@ class TestOrderLifecycle:
 
     def test_pickup_flow(self, s):
         oid = STATE["pickup_order_id"]
-        for st in ["preparing", "ready", "picked_up", "completed"]:
+        for st in ["preparing", "ready", "picked_up"]:
             r = s.post(f"{API}/orders/{oid}/status", json={"status": st})
             assert r.status_code == 200, f"{st}: {r.text}"
-            assert r.json()["status"] == st
+            assert r.json()["status"] == ("completed" if st in ("picked_up", "delivered") else st)  # auto-completion (iter 9)
 
     def test_reprint_conflict_and_force(self, s):
         oid = STATE["pickup_order_id"]

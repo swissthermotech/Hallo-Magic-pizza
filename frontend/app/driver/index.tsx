@@ -64,7 +64,7 @@ export default function DriverScreen() {
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title} testID="driver-title">{driverName}</Text>
+          <Text style={styles.title} testID="driver-title">{label || driverName}</Text>
           <Text style={styles.subtitle}>{t("driverScreen")} · {active.length}</Text>
         </View>
         <Pressable testID="driver-lock" onPress={() => { lock(); router.replace("/staff/login"); }} style={styles.iconBtn}><Feather name="log-out" size={18} color={colors.onSurfaceInverse} /></Pressable>

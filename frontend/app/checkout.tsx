@@ -9,6 +9,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useMenu, usePlaceOrder } from "@/src/api";
 import { useCart } from "@/src/cart";
+import { useOrderingStatus } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { chf } from "@/src/format";
 import { Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
@@ -43,7 +44,14 @@ export default function CheckoutScreen() {
   const [time, setTime] = useState<string>("");
   const [f, setF] = useState({ first_name: "", last_name: "", phone: "", email: "", street: "", number: "", npa: "", city: "", instructions: "" });
   const [ageOk, setAgeOk] = useState(false);
-  const slots = useMemo(timeSlots, []);
+  const { data: ordering } = useOrderingStatus();
+  // Only valid slots from the server schedule (opening hours, 15-min delivery cutoff, manager "first delivery")
+  const slots = useMemo(() => (ordering ? (type === "delivery" ? ordering.delivery_slots : ordering.pickup_slots) : timeSlots()), [ordering, type]);
+  const asapAvailable = !ordering || (type === "pickup" ? ordering.pickup_open : ordering.delivery_open);
+  const closedNow = !!ordering && !ordering.pickup_open;
+  useEffect(() => {
+    if (!asapAvailable && timeMode === "asap") setTimeMode("scheduled");
+  }, [asapAvailable, timeMode]);
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
   // Optional account: prefill contact details + saved addresses (guest checkout unchanged)
@@ -73,7 +81,7 @@ export default function CheckoutScreen() {
   const requestedTime = timeMode === "asap" ? "asap" : time;
 
   const valid =
-    f.first_name.trim() && f.phone.trim() && (timeMode === "asap" || !!time) && (type === "pickup" || (f.street.trim() && f.npa.trim() && f.city.trim() && !zoneMissing)) && (!cart.hasAlcohol || ageOk) && !belowMin && cart.items.length > 0;
+    f.first_name.trim() && f.phone.trim() && (timeMode === "asap" ? asapAvailable : !!time && slots.includes(time)) && (type === "pickup" || (f.street.trim() && f.npa.trim() && f.city.trim() && !zoneMissing)) && (!cart.hasAlcohol || ageOk) && !belowMin && cart.items.length > 0;
 
   const submit = async () => {
     if (!valid) {
@@ -121,8 +129,21 @@ export default function CheckoutScreen() {
         {/* Time */}
         <View>
           <Text style={styles.sectionTitle}>{t("desiredTime")}</Text>
+          {closedNow ? (
+            <View style={styles.closedBox} testID="checkout-closed">
+              <Feather name="clock" size={16} color={colors.onError} />
+              <Text style={styles.closedText}>{t("restaurantClosed")}{ordering?.next_open ? ` · ${t("nextOpening")}: ${ordering.next_open}` : ""}</Text>
+            </View>
+          ) : type === "delivery" && ordering && !ordering.delivery_open ? (
+            <View style={[styles.closedBox, { backgroundColor: colors.warning }]} testID="checkout-delivery-unavailable">
+              <Feather name="truck" size={16} color={colors.onWarning} />
+              <Text style={[styles.closedText, { color: colors.onWarning }]}>{t("deliveryUnavailable")}</Text>
+            </View>
+          ) : type === "delivery" && ordering?.delivery_from ? (
+            <Text style={styles.hint} testID="checkout-delivery-from">{t("earliestDelivery")}: {ordering.delivery_from}</Text>
+          ) : null}
           <View style={[styles.segment, { marginBottom: 12 }]} testID="time-mode-segment">
-            <Pressable testID="time-mode-asap" onPress={() => setTimeMode("asap")} style={[styles.segBtn, { height: 44 }, timeMode === "asap" && styles.segBtnActive]}>
+            <Pressable testID="time-mode-asap" disabled={!asapAvailable} onPress={() => setTimeMode("asap")} style={[styles.segBtn, { height: 44 }, timeMode === "asap" && styles.segBtnActive, !asapAvailable && { opacity: 0.4 }]}>
               <Feather name="zap" size={16} color={timeMode === "asap" ? colors.onSurfaceInverse : colors.onSurface} />
               <Text style={[styles.segText, { fontSize: 13 }, timeMode === "asap" && styles.segTextActive]}>{t("asap")}</Text>
             </Pressable>
@@ -134,6 +155,7 @@ export default function CheckoutScreen() {
           {timeMode === "scheduled" ? (
             <>
               <View style={styles.slots}>
+                {slots.length === 0 ? <Text style={styles.hint}>{t("restaurantClosed")}{ordering?.next_open ? ` – ${ordering.next_open}` : ""}</Text> : null}
                 {slots.map((s) => (
                   <Pressable key={s} testID={`time-slot-${s.replace(":", "")}`} onPress={() => setTime(s)} style={[styles.slot, time === s && styles.slotActive]}>
                     <Text style={[styles.slotText, time === s && styles.slotTextActive]}>{s}</Text>
@@ -248,6 +270,8 @@ const useStyles = makeStyles((colors) => ({
   hint: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted, marginTop: -10 },
   sectionTitle: { fontFamily: FONT_DISPLAY, fontSize: 20, color: colors.onSurface, marginBottom: 10 },
   slots: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  closedBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.error, borderRadius: 12, padding: 12, marginBottom: 12 },
+  closedText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "800", color: colors.onError, flex: 1 },
   slot: { height: 40, paddingHorizontal: 14, borderRadius: 999, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, justifyContent: "center" },
   slotActive: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   slotText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "600", color: colors.onSurface },

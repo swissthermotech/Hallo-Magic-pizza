@@ -103,11 +103,13 @@ export function OrderPanel(p: Props) {
         {cart.items.map((it) => (
           <View key={it.line_id} style={styles.line} testID={`phone-line-${it.line_id}`}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.lineName}>{it.name.fr}{it.size ? ` ${it.size.label}` : ""}</Text>
+              <Text style={styles.lineName}>{it.half ? `${t("halfHalf")} ${it.size?.label ?? ""}` : `${it.name.fr}${it.size ? ` ${it.size.label}` : ""}`}</Text>
+              {it.half ? <Text style={styles.mod}>½ {it.name.fr.split(" / ")[0]}{it.removed_ingredients.length ? ` (sans ${it.removed_ingredients.map((r) => r.fr).join(", ")})` : ""}{it.note ? ` · ${it.note}` : ""}</Text> : null}
+              {it.half ? <Text style={styles.mod}>½ {it.half.name.fr}{it.half.removed_ingredients.length ? ` (sans ${it.half.removed_ingredients.map((r) => r.fr).join(", ")})` : ""}{it.half.note ? ` · ${it.half.note}` : ""}</Text> : null}
               {it.options.map((o) => <Text key={o.key} style={styles.mod}>* {o.name.fr}</Text>)}
-              {it.removed_ingredients.map((r) => <Text key={r.id} style={[styles.mod, { color: colors.error }]}>– sans {r.fr}</Text>)}
+              {!it.half ? it.removed_ingredients.map((r) => <Text key={r.id} style={[styles.mod, { color: colors.error }]}>– sans {r.fr}</Text>) : null}
               {it.extras.map((e) => <Text key={e.extra_id} style={[styles.mod, { color: colors.success }]}>+ {e.quantity > 1 ? `${e.quantity}x ` : ""}{e.name.fr}</Text>)}
-              {it.note ? <Text style={[styles.mod, { color: colors.warning }]}>NOTE: {it.note}</Text> : null}
+              {it.note && !it.half ? <Text style={[styles.mod, { color: colors.warning }]}>NOTE: {it.note}</Text> : null}
               <Text style={styles.linePrice}>{chf(lineTotal(it))}</Text>
             </View>
             <View style={{ alignItems: "flex-end", gap: 6 }}>

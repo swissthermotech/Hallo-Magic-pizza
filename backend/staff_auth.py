@@ -1,6 +1,7 @@
 """Staff / driver authentication: server-side PIN verification (Argon2 hashes in Mongo), JWT with a role claim.
 Roles: manager, kitchen, phone, driver1, driver2, driver3. PINs are never shipped to the frontend."""
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List
 
@@ -55,9 +56,36 @@ def role_label(role: str) -> str:
     return DRIVER_NAME.get(role) or {"manager": "Manager", "kitchen": "Cuisine / Staff", "phone": "Commandes téléphoniques"}[role]
 
 
+async def open_shift(role: str):
+    return await db.driver_shifts.find_one({"role": role, "closed_at": None, "expires_at": {"$gt": datetime.now(timezone.utc)}})
+
+
+async def open_shift_for_name(driver_label: str):
+    role = next((r for r, n in DRIVER_NAME.items() if n == driver_label), None)
+    return await open_shift(role) if role else None
+
+
 @router.post("/login", response_model=StaffTokenOut)
 async def staff_login(body: StaffLoginIn):
+    # Drivers: temporary 6-digit shift PIN (one open shift per position, one device per shift)
+    if len(body.pin) == 6:
+        async for sh in db.driver_shifts.find({"closed_at": None}):
+            try:
+                ok = password_hash.verify(body.pin, sh["pin_hash"])
+            except Exception:
+                ok = False
+            if not ok:
+                continue
+            if sh["expires_at"].replace(tzinfo=timezone.utc) <= datetime.now(timezone.utc):
+                raise HTTPException(403, f"{DRIVER_NAME[sh['role']]}: service expiré – le manager doit rouvrir le service")
+            sid = secrets.token_hex(8)  # new device takes over the shift session (single active device)
+            await db.driver_shifts.update_one({"_id": sh["_id"]}, {"$set": {"session_id": sid, "last_login_at": datetime.now(timezone.utc)}})
+            now = datetime.now(timezone.utc)
+            tok = jwt.encode({"sub": sh["role"], "role": sh["role"], "typ": "staff", "sid": sid, "name": sh["name"], "iat": now, "exp": sh["expires_at"]}, JWT_SECRET, algorithm=JWT_ALG)
+            return StaffTokenOut(access_token=tok, role=sh["role"], label=f"{DRIVER_NAME[sh['role']]} — {sh['name']}")
     async for doc in db.staff_auth.find({}):
+        if doc["_id"] in DRIVER_NAME:
+            continue  # permanent driver PINs are retired – drivers only enter with a shift PIN
         try:
             if password_hash.verify(body.pin, doc["pin_hash"]):
                 if not doc.get("active", True):
@@ -82,10 +110,13 @@ async def staff_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)
             raise ValueError()
     except (InvalidTokenError, KeyError, ValueError):
         raise HTTPException(401, "Session invalide ou expirée")
-    if payload["role"] in DRIVER_NAME:  # deactivating a driver position ends its existing sessions immediately
-        doc = await db.staff_auth.find_one({"_id": payload["role"]})
-        if doc and not doc.get("active", True):
-            raise HTTPException(403, "Poste livreur INACTIF")
+    if payload["role"] in DRIVER_NAME:
+        sh = await open_shift(payload["role"])
+        if not sh:
+            raise HTTPException(403, "Service fermé – demandez au manager d'ouvrir le service")
+        if payload.get("sid") != sh.get("session_id"):
+            raise HTTPException(403, "Session remplacée (autre appareil) – reconnectez-vous avec le code du service")
+        return {"role": payload["role"], "name": sh["name"], "shift_id": str(sh["_id"])}
     return {"role": payload["role"]}
 
 
@@ -99,7 +130,8 @@ def require_roles(*roles: str):
 
 @router.get("/me", response_model=StaffTokenOut)
 async def staff_me(user: dict = Depends(staff_user), credentials: HTTPAuthorizationCredentials = Depends(bearer)):
-    return StaffTokenOut(access_token=credentials.credentials, role=user["role"], label=role_label(user["role"]))
+    label = f"{role_label(user['role'])} — {user['name']}" if user.get("name") else role_label(user["role"])
+    return StaffTokenOut(access_token=credentials.credentials, role=user["role"], label=label)
 
 
 class PinChangeIn(BaseModel):
@@ -138,3 +170,51 @@ async def set_driver_active(role: str, body: ActiveIn, _: dict = Depends(require
         raise HTTPException(400, "Driver role expected")
     await db.staff_auth.update_one({"_id": role}, {"$set": {"active": body.active, "active_changed_at": datetime.now(timezone.utc)}})
     return {"role": role, "label": DRIVER_NAME[role], "active": body.active}
+
+
+# ---------------------------------------------------------------------------
+# Driver shifts (manager): OUVRIR LE SERVICE -> temporary 6-digit PIN, RESET SESSION, FERMER LE SERVICE
+# ---------------------------------------------------------------------------
+class ShiftOpenIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+
+
+def shift_view(sh: dict, pin: str = None) -> dict:
+    return {"role": sh["role"], "driver": DRIVER_NAME[sh["role"]], "name": sh["name"], "opened_at": sh["opened_at"], "expires_at": sh["expires_at"],
+            "closed_at": sh.get("closed_at"), "last_login_at": sh.get("last_login_at"), "connected": bool(sh.get("last_login_at")), **({"pin": pin} if pin else {})}
+
+
+@router.get("/shifts")
+async def list_shifts(_: dict = Depends(require_roles("manager"))):
+    out = []
+    for role, driver in DRIVER_NAME.items():
+        sh = await open_shift(role)
+        out.append(shift_view(sh) if sh else {"role": role, "driver": driver, "name": None, "opened_at": None, "expires_at": None, "connected": False})
+    return out
+
+
+@router.post("/shifts/{role}/open")
+async def open_shift_ep(role: str, body: ShiftOpenIn, _: dict = Depends(require_roles("manager"))):
+    if role not in DRIVER_NAME:
+        raise HTTPException(400, "Driver role expected")
+    now = datetime.now(timezone.utc)
+    await db.driver_shifts.update_many({"role": role, "closed_at": None}, {"$set": {"closed_at": now, "closed_reason": "reopened"}})  # old PIN stops working
+    pin = f"{secrets.randbelow(900000) + 100000}"
+    sh = {"role": role, "name": body.name.strip(), "pin_hash": password_hash.hash(pin), "opened_at": now, "expires_at": shift_expiry(), "closed_at": None, "session_id": None}
+    await db.driver_shifts.insert_one(sh)
+    return shift_view(sh, pin)  # the PIN is shown to the manager once – never stored in clear
+
+
+@router.post("/shifts/{role}/reset-session")
+async def reset_shift_session(role: str, _: dict = Depends(require_roles("manager"))):
+    sh = await open_shift(role)
+    if not sh:
+        raise HTTPException(404, "Aucun service ouvert")
+    await db.driver_shifts.update_one({"_id": sh["_id"]}, {"$set": {"session_id": None, "last_login_at": None}})  # current phone is logged out; same PIN on the new phone
+    return {"ok": True}
+
+
+@router.post("/shifts/{role}/close")
+async def close_shift(role: str, _: dict = Depends(require_roles("manager"))):
+    res = await db.driver_shifts.update_many({"role": role, "closed_at": None}, {"$set": {"closed_at": datetime.now(timezone.utc), "closed_reason": "closed"}})
+    return {"ok": True, "closed": res.modified_count}

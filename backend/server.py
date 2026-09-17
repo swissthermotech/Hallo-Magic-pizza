@@ -16,6 +16,7 @@ from database import client, db
 import auth as auth_mod
 import photos as photos_mod
 import staff_auth as staff_mod
+import hours as hours_mod
 from fastapi.security import HTTPAuthorizationCredentials
 
 # Role guards (server-side JWT). Customer-facing endpoints (menu, settings, POST /orders, GET /orders/{id}, GET /orders?ids=) stay public.
@@ -143,6 +144,7 @@ class Product(BaseDocument):
     allowed_extra_ids: List[str] = []
     customizable: bool = False
     allergens: I18n = I18n()
+    origin: I18n = I18n()   # meat / fish origin for this product (admin-maintained, empty = not configured)
     available: bool = True
     is_alcohol: bool = False
     alcohol_type: Optional[str] = None  # "fermented" (beer, wine, prosecco -> 16+) | "spirits" (distilled -> 18+)
@@ -165,6 +167,7 @@ class ProductIn(BaseModel):
     allowed_extra_ids: List[str] = []
     customizable: bool = False
     allergens: I18n = I18n()
+    origin: I18n = I18n()
     available: bool = True
     is_alcohol: bool = False
     alcohol_type: Optional[str] = None
@@ -187,6 +190,7 @@ class ProductPatch(BaseModel):
     allowed_extra_ids: Optional[List[str]] = None
     customizable: Optional[bool] = None
     allergens: Optional[I18n] = None
+    origin: Optional[I18n] = None
     available: Optional[bool] = None
     is_alcohol: Optional[bool] = None
     alcohol_type: Optional[str] = None
@@ -233,6 +237,10 @@ class Settings(BaseModel):
     phone: str = ""
     address: str = ""
     opening_hours: Dict[str, str] = {}
+    delivery_cutoff_minutes: int = 15          # last delivery order before window end (13:45 / 21:45)
+    first_delivery: Dict[str, str] = {}        # {"lunch": "11:30", "evening": "17:00" | "closed"} – manager quick control
+    meat_fish_origin: I18n = I18n()            # "Origine des viandes et poissons" – free text maintained by admin
+    printing_enabled_at: Optional[datetime] = None  # orders created before this moment can never auto-print
     temporarily_closed: bool = False
     closed_message: I18n = I18n()
     delivery_enabled: bool = True
@@ -291,6 +299,17 @@ class OrderItemIn(BaseModel):
     option_keys: List[str] = []
     removed_ingredient_ids: List[str] = []
     extras: List[OrderExtraIn] = []
+    note: Optional[str] = None
+    # MOITIÉ / MOITIÉ (staff phone orders only): second pizza for the other half
+    half_product_id: Optional[str] = None
+    half_removed_ingredient_ids: List[str] = []
+    half_note: Optional[str] = None
+
+
+class HalfInfo(BaseModel):
+    product_id: str
+    name: I18n
+    removed_ingredients: List[Ingredient] = []
     note: Optional[str] = None
 
 
@@ -379,6 +398,7 @@ class OrderItem(BaseModel):
     removed_ingredients: List[Ingredient] = []
     extras: List[OrderExtra] = []
     note: Optional[str] = None
+    half: Optional[HalfInfo] = None  # second half (price = the more expensive pizza of the two)
     line_total: float
     # VAT snapshot at order time (product part = unit_price * quantity, extras carry their own snapshot)
     vat_rate: float = 0.0
@@ -417,6 +437,8 @@ class Order(BaseDocument):
     user_id: Optional[str] = None       # customer account (None = guest)
     station: Optional[int] = None       # phone orders: iPad "Poste 1" / "Poste 2"
     driver: Optional[str] = None        # delivery: "Livreur 1" / "Livreur 2" / "Livreur 3"
+    driver_name: Optional[str] = None   # shift display name at assignment time (e.g. "Marco") – kept in history
+    reprint_count: int = 0
     assigned_at: Optional[datetime] = None
     picked_up_at: Optional[datetime] = None
     out_for_delivery_at: Optional[datetime] = None
@@ -498,6 +520,12 @@ async def seed():
     await db.products.update_many({"is_alcohol": True, "alcohol_type": None}, {"$set": {"alcohol_type": "fermented"}})
     await auth_mod.ensure_indexes()
     await staff_mod.seed_staff_pins()
+    if PRINTNODE_API_KEY and PRINTNODE_PRINTER_ID:
+        cur = await db.settings.find_one({})
+        if cur is not None and not cur.get("printing_enabled_at"):
+            # Real printer just configured: everything created before now is historical and can never auto-print
+            await db.settings.update_one({"_id": cur["_id"]}, {"$set": {"printing_enabled_at": now_utc()}})
+            logger.info("PrintNode enabled – auto-print only for orders created from now on")
     # Idempotency key for phone orders: unique only when present (documents without a key never collide)
     try:
         await db.orders.drop_index("client_request_id_1")
@@ -642,6 +670,30 @@ async def delete_extra(extra_id: str, _: dict = Depends(MANAGER)):
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
+@api.get("/settings/ordering")
+async def get_ordering_status():
+    """Customer ordering status for now (Europe/Zurich): open flags, next opening, valid pickup/delivery slots."""
+    return hours_mod.ordering_status(await get_settings(), datetime.now(TZ))
+
+
+class FirstDeliveryIn(BaseModel):
+    lunch: Optional[str] = None    # "11:30" | "closed" | "" (= opening time)
+    evening: Optional[str] = None
+
+
+@api.put("/settings/first-delivery")
+async def set_first_delivery(body: FirstDeliveryIn, _: dict = Depends(staff_mod.require_roles("manager"))):
+    """Manager quick control: 'Première livraison disponible' per service, without touching other settings."""
+    cur = await get_settings()
+    fd = dict(cur.first_delivery or {})
+    for k in ("lunch", "evening"):
+        v = getattr(body, k)
+        if v is not None:
+            fd[k] = v.strip()
+    await db.settings.update_one({}, {"$set": {"first_delivery": fd}}, upsert=True)
+    return {"first_delivery": fd, "ordering": hours_mod.ordering_status(await get_settings(), datetime.now(TZ))}
+
+
 @api.get("/settings", response_model=Settings)
 async def get_settings():
     doc = await db.settings.find_one({"_id": "main"})
@@ -732,10 +784,21 @@ def collection_fields(payment_method: str, total: float) -> dict:
     return {"collection_method": method, "amount_due": round(total, 2), "payment_collected": False}
 
 
-async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bool = True) -> Order:
+async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bool = True, allow_half: bool = False, enforce_hours: bool = True) -> Order:
     """Validates the cart against the live catalog and builds the full Order (prices + frozen VAT snapshot).
     Shared by customer checkout (/orders) and staff phone orders (/phone-orders)."""
     settings = await get_settings()
+    if enforce_hours:
+        st = hours_mod.ordering_status(settings, datetime.now(TZ))
+        if not body.requested_time or body.requested_time == "asap":
+            if body.type == "pickup" and not st["pickup_open"]:
+                raise HTTPException(400, f"Restaurant fermé – prochaine ouverture {st['next_open'] or '–'}")
+            if body.type == "delivery" and not st["delivery_open"]:
+                raise HTTPException(400, "Livraison indisponible pour le moment – le retrait reste possible jusqu'à la fermeture" if st["pickup_open"] else f"Restaurant fermé – prochaine ouverture {st['next_open'] or '–'}")
+        else:
+            slots = st["pickup_slots"] if body.type == "pickup" else st["delivery_slots"]
+            if body.requested_time.strip() not in slots:
+                raise HTTPException(400, "Heure non disponible – choisissez un créneau proposé")
     if settings.temporarily_closed:
         raise HTTPException(400, "Restaurant temporarily closed")
     if body.type == "delivery" and not settings.delivery_enabled:
@@ -800,6 +863,19 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
                 p = odoc.get("price_by_size", {}).get(size.key if size else "", odoc.get("price", 0.0))
                 opts.append(OrderItemOption(key=odoc["key"], name=I18n(**odoc["name"]), price=p))
                 opt_sum += p
+        half: Optional[HalfInfo] = None
+        if it.half_product_id:
+            if not allow_half:
+                raise HTTPException(400, "Pizza moitié/moitié disponible uniquement par téléphone")
+            hdoc = await db.products.find_one({"_id": oid(it.half_product_id), "deleted_at": None})
+            if not hdoc:
+                raise HTTPException(400, "Second half not found")
+            hsizes = hdoc.get("sizes") or []
+            hs = next((x for x in hsizes if size and x["key"] == size.key), None)
+            h_price = hs["price"] if hs else hdoc["price"]
+            base_price = max(base_price, h_price)  # business rule: price of the more expensive pizza
+            h_removed = [Ingredient(**ing) for ing in (hdoc.get("ingredients") or []) if ing["id"] in set(it.half_removed_ingredient_ids)]
+            half = HalfInfo(product_id=it.half_product_id, name=I18n(**hdoc["name"]), removed_ingredients=h_removed, note=it.half_note or None)
         qty = max(1, it.quantity)
         unit = base_price + opt_sum
         line_total = round((unit + ex_sum) * qty, 2)
@@ -809,7 +885,7 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         vat_groups[prod_rate] = vat_groups.get(prod_rate, 0.0) + pg
         items.append(OrderItem(
             product_id=it.product_id, name=I18n(**pdoc["name"]), unit_price=unit, quantity=qty, size=size, options=opts,
-            removed_ingredients=removed, extras=ex_list, note=(it.note or None), line_total=line_total,
+            removed_ingredients=removed, extras=ex_list, note=(it.note or None), half=half, line_total=line_total,
             vat_rate=prod_rate, gross_amount=pg, net_amount=pn, vat_amount=pv,
         ))
     age_req = required_age(alcohol_products)
@@ -879,7 +955,7 @@ async def create_phone_order(body: PhoneOrderIn, _: dict = Depends(PHONE)):
     customer = await db.users.find_one({"_id": oid(body.customer_id)}) if body.customer_id else None
     body.source = "telephone"
     body.age_confirmed = True  # staff informs the caller; the 16+/18+ ID check happens at handover (ticket + dashboard warning)
-    order = await compute_order(body, customer, enforce_minimum=False)  # staff may confirm below the usual web/app minimum
+    order = await compute_order(body, customer, enforce_minimum=False, allow_half=True, enforce_hours=False)  # staff overrides: minimum, hours, half/half
     ts = now_utc()
     if body.requested_time and body.requested_time != "asap":
         ready = parse_local_time(body.requested_time)
@@ -921,10 +997,14 @@ async def assign_driver(order_id: str, body: AssignIn, _: dict = Depends(STAFF))
         raise HTTPException(400, "Unknown driver")
     if doc.get("driver") and doc["driver"] != body.driver and doc.get("picked_up_at"):
         raise HTTPException(409, f"Commande déjà prise en charge par {doc['driver']}")
+    shift = await staff_mod.open_shift_for_name(body.driver)
+    if not shift:
+        raise HTTPException(409, f"Aucun service ouvert pour {body.driver} – ouvrez le service (Admin → Sécurité)")
+    fields = {"driver": body.driver, "driver_name": shift["name"], "assigned_at": now_utc()}
     if doc["status"] in ("ready", "assigned"):
         notif = make_notification("assigned", doc["order_number"]) if doc["status"] == "ready" else None
-        return await push_status(doc, "assigned", notif, {"driver": body.driver, "assigned_at": now_utc()})
-    new = await db.orders.find_one_and_update({"_id": doc["_id"]}, {"$set": {"driver": body.driver, "assigned_at": now_utc()}}, return_document=ReturnDocument.AFTER)
+        return await push_status(doc, "assigned", notif, fields)
+    new = await db.orders.find_one_and_update({"_id": doc["_id"]}, {"$set": fields}, return_document=ReturnDocument.AFTER)
     return Order.from_mongo(new)
 
 
@@ -1024,8 +1104,12 @@ async def closing_report(date: Optional[str] = None, _: dict = Depends(staff_mod
     docs = await db.orders.find({"type": "delivery", "driver": {"$ne": None}, "created_at": {"$gte": start, "$lt": end}}).to_list(2000)
     closings = {c["driver"]: c async for c in db.closings.find({"date": day})}
     out = []
+    groups = []
     for name in staff_mod.DRIVER_NAME.values():
-        mine = [o for o in docs if o.get("driver") == name]
+        names = sorted({o.get("driver_name") or "" for o in docs if o.get("driver") == name}) or [""]
+        groups += [(name, n) for n in names]
+    for name, shift_name in groups:
+        mine = [o for o in docs if o.get("driver") == name and (o.get("driver_name") or "") == shift_name]
         delivered = [o for o in mine if o["status"] in ("delivered", "completed")]
         cancelled = [o for o in mine if o["status"] == "cancelled"]
         cash = round(sum(o["total"] for o in delivered if (o.get("collection_method") or "cash") == "cash"), 2)
@@ -1033,7 +1117,8 @@ async def closing_report(date: Optional[str] = None, _: dict = Depends(staff_mod
         paid = round(sum(o["total"] for o in delivered if o.get("collection_method") == "none"), 2)
         c = closings.get(name)
         out.append({
-            "driver": name, "date": day, "deliveries": len(delivered), "cancelled": len(cancelled),
+            "driver": name, "driver_name": shift_name or None, "label": f"{name} — {shift_name}" if shift_name else name,
+            "date": day, "deliveries": len(delivered), "cancelled": len(cancelled),
             "orders": [{"id": str(o["_id"]), "order_number": o["order_number"], "total": o["total"], "collection_method": o.get("collection_method") or "cash",
                         "payment_collected": o.get("payment_collected", False), "delivered_at": o.get("delivered_at"), "status": o["status"],
                         "city": (o.get("address") or {}).get("city", "")} for o in sorted(mine, key=lambda x: x["created_at"])],
@@ -1154,8 +1239,23 @@ def parse_local_time(hhmm: str) -> datetime:
 # ---------------------------------------------------------------------------
 # Printing (PrintNode architecture – disabled until credentials are configured)
 # ---------------------------------------------------------------------------
-PRINTNODE_API_KEY = os.environ.get("PRINTNODE_API_KEY", "")
-PRINTNODE_PRINTER_ID = os.environ.get("PRINTNODE_PRINTER_ID", "")
+PRINTNODE_API_KEY = os.environ.get("PRINTNODE_API_KEY", "").strip()
+PRINTNODE_PRINTER_ID = os.environ.get("PRINTNODE_PRINTER_ID", "").strip()
+if PRINTNODE_API_KEY and PRINTNODE_PRINTER_ID:
+    logger.info("PrintNode configured – printer %s", PRINTNODE_PRINTER_ID)
+else:
+    logger.warning("PrintNode NOT configured (PRINTNODE_API_KEY=%s, PRINTNODE_PRINTER_ID=%s) – print jobs will only be SIMULATED",
+                   "set" if PRINTNODE_API_KEY else "EMPTY", PRINTNODE_PRINTER_ID or "EMPTY")
+
+
+def is_historical(doc: dict, settings: Settings) -> bool:
+    """True for orders created before the real printer was enabled: they must never reach the printer
+    (no auto-print, no manual reprint, no receipt) – protects against replaying test/old orders."""
+    if not settings.printing_enabled_at:
+        return False
+    created = doc["created_at"] if doc["created_at"].tzinfo else doc["created_at"].replace(tzinfo=timezone.utc)
+    enabled = settings.printing_enabled_at.replace(tzinfo=settings.printing_enabled_at.tzinfo or timezone.utc)
+    return created < enabled
 
 
 async def send_to_printer(order_doc: dict, text: str, kind: str = "kitchen") -> str:
@@ -1168,6 +1268,7 @@ async def send_to_printer(order_doc: dict, text: str, kind: str = "kitchen") -> 
     }
     if not PRINTNODE_API_KEY or not PRINTNODE_PRINTER_ID:
         job["status"] = "simulated"
+        logger.warning("Print job for order #%s only SIMULATED – PrintNode credentials missing", order_doc["order_number"])
         await db.print_jobs.insert_one(job)
         return "simulated"
     try:
@@ -1177,7 +1278,7 @@ async def send_to_printer(order_doc: dict, text: str, kind: str = "kitchen") -> 
         payload = {"printerId": int(PRINTNODE_PRINTER_ID), "title": f"Commande #{order_doc['order_number']}",
                    "contentType": "raw_base64", "content": base64.b64encode(esc.encode("cp1252", "replace")).decode(),
                    "source": "Hallo Magic Pizza"}
-        if kind == "kitchen" and order_doc["type"] == "delivery":
+        if kind in ("kitchen", "reprint") and order_doc["type"] == "delivery":
             esc = "\x1b@" + text + "\n" + escpos_qr(f"/driver?o={order_doc['_id']}") + "\n\n\n\n\x1dV\x00"
             payload["content"] = base64.b64encode(esc.encode("cp1252", "replace")).decode()
         r = requests.post("https://api.printnode.com/printjobs", json=payload, auth=(PRINTNODE_API_KEY, ""), timeout=10)
@@ -1185,11 +1286,14 @@ async def send_to_printer(order_doc: dict, text: str, kind: str = "kitchen") -> 
         job["provider_response"] = r.text[:500]
         if r.ok:
             job["printnode_job_id"] = r.text.strip().strip('"')
+            logger.info("PrintNode job %s sent for order #%s (%s)", job["printnode_job_id"], order_doc["order_number"], kind)
         else:
             job["error"] = f"PrintNode HTTP {r.status_code}: {r.text[:200]}"
+            logger.error("PrintNode rejected job for order #%s: %s", order_doc["order_number"], job["error"])
     except Exception as e:  # network / config error
         job["status"] = "failed"
         job["error"] = str(e)
+        logger.error("PrintNode request failed for order #%s: %s", order_doc["order_number"], e)
     await db.print_jobs.insert_one(job)
     return job["status"]
 
@@ -1210,25 +1314,42 @@ def escpos_qr(data: str) -> str:
 
 
 async def do_print(doc: dict, force: bool) -> dict:
+    if doc.get("status") == "pending":
+        raise HTTPException(409, "Order not accepted yet – the ticket prints on acceptance")
     if doc.get("printed") and not force:
         raise HTTPException(409, "Ticket already printed")
     if doc.get("print_status") == "failed" and not force:
         force = True  # RETRY after a failure is always allowed (job preserved in print_jobs)
-    # Guard against accidental double taps: refuse a second job within 10 seconds
+    settings = await get_settings()
+    if is_historical(doc, settings):
+        # Historical / test order (created before the real printer was enabled): never sent to the printer,
+        # neither automatically nor by a manual reprint.
+        if force:
+            raise HTTPException(409, "Historical order – printing disabled")
+        await db.print_jobs.insert_one({"order_id": str(doc["_id"]), "order_number": doc["order_number"], "kind": "kitchen", "status": "skipped_historical", "created_at": now_utc()})
+        await db.orders.update_one({"_id": doc["_id"]}, {"$set": {"printed": True, "printed_at": now_utc(), "print_status": "skipped_historical"}})
+        return {"ok": True, "printed": True, "print_status": "skipped_historical", "print_attempts": doc.get("print_attempts", 0), "text": ""}
+    if not force:
+        # Durable idempotency: exactly one automatic print per order, across devices/retries/restarts
+        locked = await db.orders.find_one_and_update({"_id": doc["_id"], "printed": {"$ne": True}, "print_lock": {"$exists": False}},
+                                                     {"$set": {"print_lock": now_utc()}})
+        if not locked:
+            raise HTTPException(409, "Ticket already printed")
     last = doc.get("printed_at")
     if last and not force:
         if last.tzinfo is None:
             last = last.replace(tzinfo=timezone.utc)
         if now_utc() - last < timedelta(seconds=10):
             raise HTTPException(409, "Print job already in progress")
-    settings = await get_settings()
-    text = build_ticket(doc, settings)
-    status = await send_to_printer(doc, text)
-    job = await db.print_jobs.find_one({"order_id": str(doc["_id"]), "kind": "kitchen"}, sort=[("created_at", -1)])
+    is_reprint = bool(force and doc.get("printed") and doc.get("print_status") in ("sent", "simulated"))
+    text = build_ticket(doc, settings, reprint=is_reprint)
+    status = await send_to_printer(doc, text, kind="reprint" if is_reprint else "kitchen")
+    job = await db.print_jobs.find_one({"order_id": str(doc["_id"])}, sort=[("created_at", -1)])
     ok = status in ("sent", "simulated")
-    upd = {"printed": ok, "printed_at": now_utc(), "print_status": status, "last_print_error": (job or {}).get("error") if not ok else None,
+    upd = {"printed": ok or bool(doc.get("printed")), "printed_at": now_utc(), "print_status": status, "last_print_error": (job or {}).get("error") if not ok else None,
            "printnode_job_id": (job or {}).get("printnode_job_id")}
-    new = await db.orders.find_one_and_update({"_id": doc["_id"]}, {"$set": upd, "$inc": {"print_attempts": 1}}, return_document=ReturnDocument.AFTER)
+    inc = {"print_attempts": 1, **({"reprint_count": 1} if is_reprint else {})}
+    new = await db.orders.find_one_and_update({"_id": doc["_id"]}, {"$set": upd, "$unset": {"print_lock": ""}, "$inc": inc}, return_document=ReturnDocument.AFTER)
     return {"ok": ok, "printed": ok, "printed_at": new["printed_at"], "print_attempts": new["print_attempts"],
             "print_status": status, "last_print_error": upd["last_print_error"], "printnode_job_id": upd["printnode_job_id"], "text": text}
 
@@ -1349,12 +1470,15 @@ async def set_status(order_id: str, body: StatusIn, _: dict = Depends(STAFF)):
 # ---------------------------------------------------------------------------
 # 80mm ticket
 # ---------------------------------------------------------------------------
-def build_ticket(o: dict, settings: Settings) -> str:
+def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     """OPERATIONAL kitchen / delivery ticket (80 mm, 32 cols). Not a fiscal receipt (see build_receipt)."""
     W = 32
     c = lambda t: t.center(W)  # noqa: E731
     big = lambda t: c(" ".join(t))  # noqa: E731  (spaced letters read as "large" in plain text)
-    lines: List[str] = [c(settings.restaurant_name.upper()), "=" * W, "", big("LIVRAISON" if o["type"] == "delivery" else "RETRAIT"), "", big(f"#{o['order_number']}"), ""]
+    lines: List[str] = [c(settings.restaurant_name.upper()), "=" * W]
+    if reprint:
+        lines += [c("*** REIMPRESSION ***"), "=" * W]
+    lines += ["", big("LIVRAISON" if o["type"] == "delivery" else "RETRAIT"), "", big(f"#{o['order_number']}"), ""]
     when = fmt_time(o.get("estimated_ready_at")) if o.get("estimated_ready_at") else (o.get("requested_time") if o.get("requested_time") not in (None, "asap") else "DES QUE POSSIBLE")
     lines += [c(("LIVRAISON " if o["type"] == "delivery" else "PRET ") + when), "=" * W]
     src = f"TELEPHONE - POSTE {o.get('station') or 1}" if o.get("source") == "telephone" else o.get("source", "web").upper()
@@ -1362,7 +1486,7 @@ def build_ticket(o: dict, settings: Settings) -> str:
     if o.get("requested_time") and o["requested_time"] != "asap":
         lines.append(f"Souhaite: {o['requested_time']}")
     if o.get("driver"):
-        lines += ["", "*" * W, big(o["driver"].upper()), "*" * W]
+        lines += ["", "*" * W, big(o["driver"].upper())] + ([c(f"— {o['driver_name'].upper()} —")] if o.get("driver_name") else []) + ["*" * W]
     if o.get("age_required"):
         lines += ["", "!" * W, c(f"ALCOOL - CONTROLE AGE {o['age_required']}+"), c("VERIFIER LA PIECE D'IDENTITE"), "!" * W]
     # Payment block
@@ -1380,6 +1504,23 @@ def build_ticket(o: dict, settings: Settings) -> str:
     lines += ["-" * W]
     for it in o["items"]:
         size = f" {it['size']['label'].upper().replace('CM', ' CM')}" if it.get("size") else ""
+        if it.get("half"):
+            lines.append(f"{it['quantity']}x PIZZA{size} - MOITIE / MOITIE")
+            lines.append(f"   1/2 {it['name']['fr'].upper()}")
+            for r in it.get("removed_ingredients", []):
+                lines.append(f"       - SANS {r['fr'].upper()}")
+            if it.get("note"):
+                lines.append(f"       NOTE: {it['note'].upper()}")
+            lines.append(f"   1/2 {it['half']['name']['fr'].upper()}")
+            for r in it["half"].get("removed_ingredients", []):
+                lines.append(f"       - SANS {r['fr'].upper()}")
+            if it["half"].get("note"):
+                lines.append(f"       NOTE: {it['half']['note'].upper()}")
+            for e in it.get("extras", []):
+                q = f"{e['quantity']}x " if e["quantity"] > 1 else ""
+                lines.append(f"   + {q}{e['name']['fr'].upper()}")
+            lines.append("")
+            continue
         lines.append(f"{it['quantity']}x {it['name']['fr'].upper()}{size}")
         for op in it.get("options", []):
             lines.append(f"   * {op['name']['fr'].upper()}")
@@ -1518,6 +1659,8 @@ async def print_receipt(order_id: str, body: PrintIn = PrintIn(), _: dict = Depe
     if doc.get("receipt_printed") and not body.force:
         raise HTTPException(409, "Receipt already printed")
     s = await get_settings()
+    if is_historical(doc, s):
+        raise HTTPException(409, "Historical order – printing disabled")
     text = build_receipt(doc, s)
     status = await send_to_printer(doc, text, kind="receipt")
     new = await db.orders.find_one_and_update(

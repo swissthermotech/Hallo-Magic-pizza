@@ -71,9 +71,17 @@ export default function MoreScreen() {
               {Object.entries(s.opening_hours).map(([d, h]) => (
                 <View key={d} style={styles.hoursRow}>
                   <Text style={styles.day}>{DAYS[d]?.[lang] ?? d}</Text>
-                  <Text style={styles.hours}>{h}</Text>
+                  <Text style={styles.hours}>{h || t("closedF")}</Text>
                 </View>
               ))}
+            </View>
+          </View>
+        ) : null}
+        {s ? (
+          <View testID="origin-section">
+            <Text style={styles.section}>{t("meatFishOrigin")}</Text>
+            <View style={[styles.card, { padding: 16 }]}>
+              <Text style={styles.info}>{tx(s.meat_fish_origin) || t("notConfigured")}</Text>
             </View>
           </View>
         ) : null}

@@ -277,6 +277,9 @@ export function usePlacePhoneOrder() {
           removed_ingredient_ids: i.removed_ingredients.map((r) => r.id),
           extras: i.extras.map((e) => ({ extra_id: e.extra_id, quantity: e.quantity })),
           note: i.note || null,
+          half_product_id: i.half?.product_id ?? null,
+          half_removed_ingredient_ids: i.half?.removed_ingredients.map((r) => r.id) ?? [],
+          half_note: i.half?.note || null,
         })),
         customer: p.customer,
         address: p.address,
@@ -338,7 +341,7 @@ export function useDriverAction() {
 
 // ---- Manager reports ----
 export interface DriverClosing {
-  driver: string; date: string; deliveries: number; cancelled: number;
+  driver: string; driver_name?: string | null; label?: string; date: string; deliveries: number; cancelled: number;
   orders: { id: string; order_number: number; total: number; collection_method: string; payment_collected: boolean; delivered_at?: string | null; status: string; city: string }[];
   cash_expected: number; terminal_expected: number; paid_no_collection: number; total: number;
   actual_cash?: number | null; actual_terminal?: number | null; cash_difference?: number | null; terminal_difference?: number | null; closed_at?: string | null;
@@ -360,4 +363,25 @@ export const staffPins = {
   roles: () => api.get<{ role: string; label: string; active: boolean }[]>("/auth/staff/roles"),
   change: (role: string, pin: string) => api.put("/auth/staff/pins", { role, pin }),
   setActive: (role: string, active: boolean) => api.put<{ role: string; active: boolean }>(`/auth/staff/drivers/${role}/active`, { active }),
+};
+
+// ---- Ordering hours / first delivery ----
+export interface OrderingStatus { open_now: boolean; pickup_open: boolean; delivery_open: boolean; delivery_from?: string | null; next_open?: string | null; pickup_slots: string[]; delivery_slots: string[] }
+export function useOrderingStatus() {
+  return useQuery({ queryKey: ["ordering"], queryFn: () => api.get<OrderingStatus>("/settings/ordering"), refetchInterval: 60000 });
+}
+export function useSetFirstDelivery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { lunch?: string; evening?: string }) => api.put<{ first_delivery: Record<string, string> }>("/settings/first-delivery", body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["menu"] }); qc.invalidateQueries({ queryKey: ["ordering"] }); },
+  });
+}
+// ---- Driver shifts (manager) ----
+export interface Shift { role: string; driver: string; name: string | null; opened_at?: string | null; expires_at?: string | null; connected: boolean; pin?: string }
+export const shiftsApi = {
+  list: () => api.get<Shift[]>("/auth/staff/shifts"),
+  open: (role: string, name: string) => api.post<Shift>(`/auth/staff/shifts/${role}/open`, { name }),
+  reset: (role: string) => api.post(`/auth/staff/shifts/${role}/reset-session`, {}),
+  close: (role: string) => api.post(`/auth/staff/shifts/${role}/close`, {}),
 };

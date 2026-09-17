@@ -5,6 +5,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { makeStyles } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { staffPins } from "@/src/api";
+import { DriverShifts } from "@/src/components/driver-shifts";
 import { Button, Field, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
 
 /** Manager only: change the access code of each role (verified & stored hashed on the server). */
@@ -53,7 +54,9 @@ export default function SecurityScreen() {
     <View style={styles.screen}>
       <ScreenHeader title={t("security")} subtitle={t("securityHint")} testID="security-title" />
       <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: insets.bottom + 40 }} bottomOffset={40}>
-        {roles.map((r) => (
+        <DriverShifts />
+        <Text style={styles.label}>{t("security")}</Text>
+        {roles.filter((r) => !r.role.startsWith("driver")).map((r) => (
           <View key={r.role} style={styles.card} testID={`security-role-${r.role}`}>
             <View style={styles.row}>
               <Text style={styles.label}>{r.label}</Text>

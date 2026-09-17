@@ -68,6 +68,11 @@ export default function SettingsScreen() {
           <Field label={t("city")} value={s.city} onChangeText={(v) => setS({ ...s, city: v, address: `${s.street}, ${s.postal_code} ${v}` })} style={{ flex: 2 }} testID="settings-city" />
         </View>
         <Field label={t("phone")} value={s.phone} onChangeText={(v) => setS({ ...s, phone: v })} testID="settings-phone" />
+        <Field label={`${t("meatFishOrigin")} (FR)`} value={s.meat_fish_origin?.fr ?? ""} onChangeText={(v) => setS({ ...s, meat_fish_origin: { fr: v, de: s.meat_fish_origin?.de ?? "" } })} multiline placeholder="ex. Jambon: Suisse · Poulet: Suisse · Thon: Océan Pacifique" testID="settings-origin-fr" />
+        <Field label={`${t("meatFishOrigin")} (DE)`} value={s.meat_fish_origin?.de ?? ""} onChangeText={(v) => setS({ ...s, meat_fish_origin: { fr: s.meat_fish_origin?.fr ?? "", de: v } })} multiline testID="settings-origin-de" />
+        {["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map((d) => (
+          <Field key={d} label={`${t("openingHours")} – ${d.toUpperCase()} (ex. 11:00-14:00, 17:00-22:00 · vide = fermé)`} value={s.opening_hours?.[d] ?? ""} onChangeText={(v) => setS({ ...s, opening_hours: { ...s.opening_hours, [d]: v } })} autoCapitalize="none" testID={`settings-hours-${d}`} />
+        ))}
         <Field label={t("vatNumber")} value={s.vat_number} onChangeText={(v) => setS({ ...s, vat_number: v })} testID="settings-vat-number" />
         <VatPicker label={t("vatStandard")} value={s.vat_rate_standard} onChange={(v) => setS({ ...s, vat_rate_standard: v })} testID="settings-vat-standard" />
         <VatPicker label={t("vatAlcohol")} value={s.vat_rate_alcohol} onChange={(v) => setS({ ...s, vat_rate_alcohol: v })} testID="settings-vat-alcohol" />

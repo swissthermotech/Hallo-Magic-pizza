@@ -62,6 +62,7 @@ export interface Product {
   allowed_extra_ids: string[];
   customizable: boolean;
   allergens: I18nText;
+  origin?: I18nText;
   available: boolean;
   is_alcohol: boolean;
   alcohol_type?: AlcoholType | null;
@@ -117,6 +118,8 @@ export interface Settings {
   phone: string;
   address: string;
   opening_hours: Record<string, string>;
+  first_delivery?: Record<string, string>;
+  meat_fish_origin?: I18nText;
   temporarily_closed: boolean;
   closed_message: I18nText;
   delivery_enabled: boolean;
@@ -220,6 +223,7 @@ export interface Order {
   user_id?: string | null;
   station?: number | null;
   driver?: string | null;
+  driver_name?: string | null;
   assigned_at?: string | null;
   picked_up_at?: string | null;
   out_for_delivery_at?: string | null;
@@ -285,4 +289,5 @@ export interface CartItem {
   note: string;
   is_alcohol: boolean;
   alcohol_type?: AlcoholType | null;
+  half?: { product_id: string; name: I18nText; removed_ingredients: Ingredient[]; note: string } | null; // MOITIÉ/MOITIÉ (phone orders)
 }

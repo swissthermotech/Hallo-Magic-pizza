@@ -36,7 +36,7 @@ export default function ClosingScreen() {
       } />
       {isLoading || !data ? <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} /></View> : (
         <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: insets.bottom + 30 }}>
-          {data.drivers.map((d) => <DriverBlock key={d.driver} d={d} />)}
+          {data.drivers.map((d, i) => <DriverBlock key={`${d.driver}-${d.driver_name ?? i}`} d={d} />)}
           {src ? (
             <View style={styles.card} testID="sources-report">
               <Text style={styles.cardTitle}>{t("bySource")}</Text>
@@ -69,7 +69,7 @@ function DriverBlock({ d }: { d: DriverClosing }) {
   return (
     <View style={styles.card} testID={`closing-${d.driver.replace(" ", "-")}`}>
       <View style={styles.row}>
-        <Text style={styles.cardTitle}>{d.driver.toUpperCase()}</Text>
+        <Text style={styles.cardTitle}>{d.driver.toUpperCase()}{d.driver_name ? ` — ${d.driver_name}` : ""}</Text>
         <Badge label={`${d.deliveries} ${t("deliveries")}${d.cancelled ? ` · ${d.cancelled} ${t("status_cancelled").toLowerCase()}` : ""}`} tone="brand" />
       </View>
       <View style={styles.row}><Text style={styles.label}>{t("payCash")}</Text><Text style={styles.value} testID={`closing-cash-${d.driver.slice(-1)}`}>{chf(d.cash_expected)}</Text></View>

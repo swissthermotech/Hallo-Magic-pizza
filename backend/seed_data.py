@@ -244,10 +244,12 @@ DEFAULT_SETTINGS = {
     "delivery_fee_vat_rate": 2.6,
     "phone": "026 430 00 96",
     "address": "Route de Chésalles 19, 1723 Marly",
-    "opening_hours": {
-        "mon": "11:00-13:30, 17:30-21:30", "tue": "11:00-13:30, 17:30-21:30", "wed": "11:00-13:30, 17:30-21:30",
-        "thu": "11:00-13:30, 17:30-21:30", "fri": "11:00-13:30, 17:30-22:00", "sat": "17:30-22:00", "sun": "17:30-21:30",
+    "opening_hours": {  # "" = closed; last delivery order 15 min before each closing (delivery_cutoff_minutes)
+        "mon": "", "tue": "17:00-22:00", "wed": "11:00-14:00, 17:00-22:00", "thu": "11:00-14:00, 17:00-22:00",
+        "fri": "11:00-14:00, 17:00-22:00", "sat": "11:00-14:00, 17:00-22:00", "sun": "11:00-14:00, 17:00-22:00",
     },
+    "delivery_cutoff_minutes": 15,
+    "first_delivery": {"lunch": "", "evening": ""},
     "temporarily_closed": False,
     "closed_message": {"fr": "Nous sommes temporairement fermés.", "de": "Wir sind vorübergehend geschlossen."},
     "delivery_enabled": True,

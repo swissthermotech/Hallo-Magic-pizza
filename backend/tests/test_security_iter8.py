@@ -3,16 +3,24 @@ Run: pytest tests/test_security_iter8.py -n 0"""
 import os
 import pytest
 import requests
+import sys, os as _os
+sys.path.insert(0, _os.path.dirname(__file__))
+from helpers import driver_pin
 
 API = os.environ.get("API_URL", "http://localhost:8001/api")
-PINS = {"manager": "1234", "kitchen": "2345", "phone": "3456", "driver1": "1111", "driver2": "2222", "driver3": "3333"}
+STATIC = {"manager": "1234", "kitchen": "2345", "phone": "3456"}
+PINS = {**STATIC, "driver1": None, "driver2": None, "driver3": None}  # driver PINs resolved lazily (shift PINs)
+
+
+def pin_for(role):
+    return STATIC.get(role) or driver_pin(role)
 
 
 @pytest.fixture(scope="module")
 def tok():
     out = {}
-    for role, pin in PINS.items():
-        r = requests.post(f"{API}/auth/staff/login", json={"pin": pin})
+    for role in PINS:
+        r = requests.post(f"{API}/auth/staff/login", json={"pin": pin_for(role)})
         assert r.status_code == 200, r.text
         assert r.json()["role"] == role
         out[role] = {"Authorization": f"Bearer {r.json()['access_token']}"}

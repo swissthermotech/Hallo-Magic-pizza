@@ -13,6 +13,9 @@ import concurrent.futures as cf
 
 import pytest
 import requests
+import sys, os as _os
+sys.path.insert(0, _os.path.dirname(__file__))
+from helpers import driver_pin
 
 BASE = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://hallo-magic-test.preview.emergentagent.com").rstrip("/")
 API = f"{BASE}/api"
@@ -60,7 +63,7 @@ def _login(s, pin):
 class TestStaffAuth:
     def test_login_all_pins(self, s):
         expected = {"1234": "manager", "2345": "kitchen", "3456": "phone",
-                    "1111": "driver1", "2222": "driver2", "3333": "driver3"}
+                    driver_pin("driver1"): "driver1", driver_pin("driver2"): "driver2", driver_pin("driver3"): "driver3"}
         for pin, role in expected.items():
             r = _login(s, pin)
             assert r.status_code == 200, f"{pin} -> {r.status_code} {r.text}"
@@ -94,19 +97,12 @@ class TestStaffAuth:
         r0 = requests.put(f"{API}/auth/staff/pins", headers=_hdr(STATE["tok_kitchen"]),
                           json={"role": "driver3", "pin": "3334"})
         assert r0.status_code == 403, r0.text
-        # manager sets driver3 -> 3334
-        r1 = requests.put(f"{API}/auth/staff/pins", headers=_hdr(STATE["tok_manager"]),
-                          json={"role": "driver3", "pin": "3334"})
+        # manager changes the kitchen PIN and restores it (driver PINs are shift PINs now)
+        r1 = requests.put(f"{API}/auth/staff/pins", headers=_hdr(STATE["tok_manager"]), json={"role": "kitchen", "pin": "2346"})
         assert r1.status_code == 200, r1.text
-        # login with 3334 works
-        r2 = _login(s, "3334")
-        assert r2.status_code == 200 and r2.json()["role"] == "driver3"
-        # restore to 3333
-        r3 = requests.put(f"{API}/auth/staff/pins", headers=_hdr(STATE["tok_manager"]),
-                          json={"role": "driver3", "pin": "3333"})
-        assert r3.status_code == 200
-        # 3333 works again
-        r4 = _login(s, "3333")
+        assert _login(s, "2346").json()["role"] == "kitchen"
+        assert requests.put(f"{API}/auth/staff/pins", headers=_hdr(STATE["tok_manager"]), json={"role": "kitchen", "pin": "2345"}).status_code == 200
+        r4 = _login(s, driver_pin('driver3'))
         assert r4.status_code == 200 and r4.json()["role"] == "driver3"
         # refresh tok_driver3 for later tests
         STATE["tok_driver3"] = r4.json()["access_token"]
@@ -195,7 +191,7 @@ class TestFlowA_WebDelivery:
         assert rc.status_code == 200 and rc.json()["status"] == "delivering"
         # delivered
         rD = requests.post(f"{API}/driver/orders/{STATE['A_id']}/delivered", headers=h)
-        assert rD.status_code == 200 and rD.json()["status"] == "delivered"
+        assert rD.status_code == 200 and rD.json()["status"] == "completed"  # LIVRÉE auto-completes (iter 9)
         assert rD.json()["delivered_at"]
 
     def test_driver1_collect_cash(self, s):
@@ -245,9 +241,8 @@ class TestFlowB_Pickup:
         r = s.post(f"{API}/orders/{oid}/status", json={"status": "preparing"})
         assert r.status_code == 409, r.text
         # continue to completion for cleanliness
-        for st in ("picked_up", "completed"):
-            r = s.post(f"{API}/orders/{oid}/status", json={"status": st})
-            assert r.status_code == 200, f"{st} -> {r.text}"
+        r = s.post(f"{API}/orders/{oid}/status", json={"status": "picked_up"})
+        assert r.status_code == 200 and r.json()["status"] == "completed", r.text  # RETIRÉE auto-completes (iter 9)
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +296,7 @@ class TestFlowC_PhoneStation1:
         assert rd.status_code == 200, rd.text
         assert rd.json()["status"] == "delivering"
         rD = requests.post(f"{API}/driver/orders/{STATE['C_id']}/delivered", headers=h)
-        assert rD.status_code == 200 and rD.json()["status"] == "delivered"
+        assert rD.status_code == 200 and rD.json()["status"] == "completed"  # LIVRÉE auto-completes (iter 9)
 
 
 # ---------------------------------------------------------------------------

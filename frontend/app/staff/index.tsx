@@ -9,12 +9,22 @@ import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useActiveOrders } from "@/src/api";
 import { useStaff } from "@/src/staff-auth";
-import { Chip, Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
+import { FirstDeliveryControl } from "@/src/components/first-delivery";
+import { Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
 import { OrderCard, OrderDetail } from "@/src/components/staff-order";
 import type { Order } from "@/src/types";
+import type { StringKey } from "@/src/i18n";
 
 const ALERT = require("../../assets/sounds/alert.wav");
 type Filter = "new" | "progress" | "done";
+type NavItem = { testID: string; href: string; icon: React.ComponentProps<typeof Feather>["name"]; label: StringKey; manager?: boolean };
+const NAV: NavItem[] = [
+  { testID: "staff-go-kitchen", href: "/staff/kitchen", icon: "coffee", label: "kitchen" },
+  { testID: "staff-go-phone-orders", href: "/phone-orders", icon: "phone", label: "phoneOrders" },
+  { testID: "staff-go-customers", href: "/staff/customers", icon: "users", label: "customers" },
+  { testID: "staff-go-closing", href: "/staff/closing", icon: "bar-chart-2", label: "closing", manager: true },
+  { testID: "staff-go-admin", href: "/staff/admin", icon: "settings", label: "admin", manager: true },
+];
 
 export default function StaffDashboard() {
   const styles = useStyles();
@@ -47,9 +57,10 @@ export default function StaffDashboard() {
     if (fresh) {
       setAlert(fresh);
       if (soundOn) {
+        // Safari/iPad may reject autoplay: never let audio break the dashboard or order sync
         try {
-          player.seekTo(0);
-          player.play();
+          Promise.resolve(player.seekTo(0)).catch(() => {});
+          Promise.resolve(player.play()).catch(() => {});
         } catch {}
       }
       const tmr = setTimeout(() => setAlert(null), 8000);
@@ -70,22 +81,27 @@ export default function StaffDashboard() {
 
   return (
     <View style={styles.screen}>
-      {/* Header */}
+      {/* Header: title + sound + lock. Navigation shortcuts live in their own labelled row below. */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Pressable testID="staff-back" onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} style={styles.iconBtn}><Feather name="arrow-left" size={20} color={colors.onSurface} /></Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title} testID="staff-dashboard-title" numberOfLines={1}>{t("dashboard")}</Text>
-          <Text style={styles.subtitle} numberOfLines={1}>{label} · iPhone · Android · Web · Téléphone</Text>
+        <View style={styles.headerRow}>
+          <Pressable testID="staff-back" onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} style={styles.iconBtn}><Feather name="arrow-left" size={20} color={colors.onSurface} /></Pressable>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.title} testID="staff-dashboard-title" numberOfLines={1}>{t("dashboard")}</Text>
+            <Text style={styles.subtitle} numberOfLines={1}>{label}</Text>
+          </View>
+          <Pressable testID="staff-sound-toggle" onPress={() => setSoundOn((v) => !v)} style={[styles.iconBtn, soundOn && styles.iconBtnOn]}>
+            <Feather name={soundOn ? "volume-2" : "volume-x"} size={20} color={soundOn ? colors.onBrandPrimary : colors.onSurface} />
+          </Pressable>
+          <Pressable testID="staff-lock" onPress={() => { lock(); router.replace("/(tabs)/more"); }} style={styles.iconBtn}><Feather name="lock" size={18} color={colors.onSurface} /></Pressable>
         </View>
-        <Pressable testID="staff-sound-toggle" onPress={() => setSoundOn((v) => !v)} style={[styles.iconBtn, soundOn && styles.iconBtnOn]}>
-          <Feather name={soundOn ? "volume-2" : "volume-x"} size={20} color={soundOn ? colors.onBrandPrimary : colors.onSurface} />
-        </Pressable>
-        <Pressable testID="staff-go-kitchen" onPress={() => router.push("/staff/kitchen")} style={styles.iconBtn}><Feather name="coffee" size={20} color={colors.onSurface} /></Pressable>
-        <Pressable testID="staff-go-phone-orders" onPress={() => router.push("/phone-orders")} style={styles.iconBtn}><Feather name="phone" size={20} color={colors.onSurface} /></Pressable>
-        <Pressable testID="staff-go-customers" onPress={() => router.push("/staff/customers")} style={styles.iconBtn}><Feather name="users" size={20} color={colors.onSurface} /></Pressable>
-        {role === "manager" ? <Pressable testID="staff-go-closing" onPress={() => router.push("/staff/closing")} style={styles.iconBtn}><Feather name="bar-chart-2" size={20} color={colors.onSurface} /></Pressable> : null}
-        {role === "manager" ? <Pressable testID="staff-go-admin" onPress={() => router.push("/staff/admin")} style={styles.iconBtn}><Feather name="settings" size={20} color={colors.onSurface} /></Pressable> : null}
-        <Pressable testID="staff-lock" onPress={() => { lock(); router.replace("/(tabs)/more"); }} style={styles.iconBtn}><Feather name="lock" size={18} color={colors.onSurface} /></Pressable>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navRow}>
+          {NAV.filter((n) => !n.manager || role === "manager").map((n) => (
+            <Pressable key={n.testID} testID={n.testID} onPress={() => router.push(n.href as any)} style={styles.navBtn}>
+              <Feather name={n.icon} size={16} color={colors.onSurface} />
+              <Text style={styles.navText}>{t(n.label)}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
       </View>
 
       {/* Alert banner */}
@@ -97,14 +113,20 @@ export default function StaffDashboard() {
         </Animated.View>
       ) : null}
 
-      {/* Filters */}
-      <View style={styles.chipRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          <Chip label={`${t("newOrders")} (${counts.new})`} selected={filter === "new"} onPress={() => setFilter("new")} testID="staff-filter-new" />
-          <Chip label={`${t("inProgress")} (${counts.progress})`} selected={filter === "progress"} onPress={() => setFilter("progress")} testID="staff-filter-progress" />
-          <Chip label={`${t("done")} (${counts.done})`} selected={filter === "done"} onPress={() => setFilter("done")} testID="staff-filter-done" />
-        </ScrollView>
+      {/* Filters: full-width segmented control, then (manager) the collapsible first-delivery card */}
+      <View style={styles.segment} testID="staff-filters">
+        {(["new", "progress", "done"] as Filter[]).map((f) => {
+          const on = filter === f;
+          const lbl = f === "new" ? t("newOrders") : f === "progress" ? t("inProgress") : t("done");
+          return (
+            <Pressable key={f} testID={`staff-filter-${f}`} onPress={() => setFilter(f)} style={[styles.segBtn, on && styles.segBtnOn, f === "new" && counts.new > 0 && !on && styles.segBtnAlert]}>
+              <Text style={[styles.segText, on && styles.segTextOn]} numberOfLines={1}>{lbl}</Text>
+              <View style={[styles.segCount, on && styles.segCountOn]}><Text style={[styles.segCountText, on && styles.segCountTextOn]}>{counts[f]}</Text></View>
+            </Pressable>
+          );
+        })}
       </View>
+      {role === "manager" ? <FirstDeliveryControl defaultOpen={twoCol} /> : null}
 
       {isLoading ? (
         <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} size="large" /></View>
@@ -131,17 +153,29 @@ export default function StaffDashboard() {
 
 const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
-  header: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingBottom: 10, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  header: { gap: 8, paddingBottom: 10, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12 },
   title: { fontFamily: FONT_DISPLAY, fontSize: 22, color: colors.onSurface },
   subtitle: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted },
   iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   iconBtnOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  navRow: { gap: 8, paddingHorizontal: 12 },
+  navBtn: { flexDirection: "row", alignItems: "center", gap: 6, height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
+  navText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.onSurface },
   alert: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.brandPrimary, padding: 14, marginHorizontal: 12, marginTop: 10, borderRadius: 14 },
   alertText: { flex: 1, fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.onBrandPrimary },
   alertBtn: { backgroundColor: colors.onBrandPrimary, paddingHorizontal: 14, height: 36, borderRadius: 10, justifyContent: "center" },
   alertBtnText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "800", color: colors.brandPrimary },
-  chipRow: { height: 56, justifyContent: "center" },
-  chips: { gap: 8, paddingHorizontal: 12, alignItems: "center" },
+  segment: { flexDirection: "row", gap: 6, margin: 12, marginBottom: 8, padding: 4, borderRadius: 16, backgroundColor: colors.surfaceTertiary },
+  segBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 44, borderRadius: 12 },
+  segBtnOn: { backgroundColor: colors.surfaceInverse },
+  segBtnAlert: { borderWidth: 1.5, borderColor: colors.brandPrimary },
+  segText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.onSurface },
+  segTextOn: { color: colors.onSurfaceInverse },
+  segCount: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary },
+  segCountOn: { backgroundColor: colors.brandPrimary },
+  segCountText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.onSurface },
+  segCountTextOn: { color: colors.onBrandPrimary },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
   leftPane: { width: "34%", borderRightWidth: 1, borderRightColor: colors.border },
   rightPane: { flex: 1, backgroundColor: colors.surface },

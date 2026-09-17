@@ -11,6 +11,7 @@ import { useCart } from "@/src/cart";
 import { chf } from "@/src/format";
 import { FONT_TEXT, useToast } from "@/src/components/ui";
 import type { Product } from "@/src/types";
+import { HalfHalfPicker } from "@/src/components/phone/half-half";
 
 /** Step 2: fast product entry from the shared menu. Simple products are added with one tap,
  * pizzas / customizable products open the existing product sheet (size, dough, extras, removals, note). */
@@ -24,6 +25,7 @@ export function MenuPanel() {
   const { data } = useMenu();
   const [q, setQ] = useState("");
   const [cat, setCat] = useState<string>("all");
+  const [half, setHalf] = useState(false);
 
   const products = useMemo(() => {
     if (!data) return [];
@@ -57,7 +59,9 @@ export function MenuPanel() {
         <TextInput testID="phone-menu-search" value={q} onChangeText={setQ} placeholder={t("searchProducts")} placeholderTextColor={colors.muted} style={styles.searchInput} autoCorrect={false} />
         {q ? <Pressable onPress={() => setQ("")} hitSlop={8}><Feather name="x" size={18} color={colors.muted} /></Pressable> : null}
       </View>
+      <HalfHalfPicker visible={half} onClose={() => setHalf(false)} />
       <View style={styles.chips}>
+        <Pressable testID="phone-half-half" onPress={() => setHalf(true)} style={[styles.chip, styles.chipHalf]}><Text style={[styles.chipText, styles.chipTextOn]}>½ / ½ {t("halfHalf")}</Text></Pressable>
         <Pressable testID="phone-cat-all" onPress={() => setCat("all")} style={[styles.chip, cat === "all" && styles.chipOn]}><Text style={[styles.chipText, cat === "all" && styles.chipTextOn]}>{t("all")}</Text></Pressable>
         {data?.categories.map((c) => (
           <Pressable key={c.id} testID={`phone-cat-${c.slug}`} onPress={() => { setCat(c.id); setQ(""); }} style={[styles.chip, cat === c.id && styles.chipOn]}><Text style={[styles.chipText, cat === c.id && styles.chipTextOn]}>{c.name.fr}</Text></Pressable>
@@ -91,6 +95,7 @@ const useStyles = makeStyles((colors) => ({
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: { height: 40, paddingHorizontal: 16, borderRadius: 999, backgroundColor: colors.surfaceTertiary, justifyContent: "center" },
   chipOn: { backgroundColor: colors.brandPrimary },
+  chipHalf: { backgroundColor: colors.surfaceInverse },
   chipText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "700", color: colors.onSurfaceTertiary },
   chipTextOn: { color: colors.onBrandPrimary },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
