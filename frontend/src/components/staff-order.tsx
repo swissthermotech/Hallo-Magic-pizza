@@ -5,7 +5,7 @@ import { Feather } from "@react-native-vector-icons/feather";
 import * as Haptics from "expo-haptics";
 import { makeStyles, useTheme } from "@/src/theme";
 import { statusLabel, useI18n } from "@/src/i18n";
-import { useAssignDriver, useOrderAction, usePrintTicket } from "@/src/api";
+import { useAssignDriver, useDriverSlots, useOrderAction, usePrintTicket } from "@/src/api";
 import { chf, elapsedMinutes, fmtTime, statusTone } from "@/src/format";
 import { Badge, Button, FONT_DISPLAY, FONT_TEXT, useToast } from "@/src/components/ui";
 import { OrderLines } from "@/src/components/order-lines";
@@ -81,6 +81,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
   const action = useOrderAction();
   const print = usePrintTicket();
   const assign = useAssignDriver();
+  const { data: slots } = useDriverSlots();
   const [customTime, setCustomTime] = useState("");
   const [rejectReason, setRejectReason] = useState("");
   const [showReject, setShowReject] = useState(false);
@@ -261,14 +262,35 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
               ))}
             </View>
           ) : null}
-          {/* 2. Driver assignment (delivery only) */}
+          {/* 2. Driver assignment (delivery only) – buttons show the PERSON currently on each slot */}
           {o.type === "delivery" ? (
             <View style={styles.box}>
               <Text style={styles.sectionLabel}>{t("mgrDriver")}{o.driver ? ` · ${o.driver}${o.driver_name ? ` — ${o.driver_name}` : ""}` : ""}</Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                {DRIVERS.map((d) => (
-                  <Button key={d} title={d} variant={o.driver === d ? "success" : "outline"} onPress={() => assign.mutateAsync({ id: o.id, driver: d }).catch((e) => toast.show(e.message, "error"))} style={{ flex: 1 }} testID={`staff-assign-${d.slice(-1)}`} />
-                ))}
+              <View style={{ gap: 8 }}>
+                {DRIVERS.map((d) => {
+                  const slot = slots?.find((s) => s.driver === d);
+                  const mine = o.driver === d;
+                  return (
+                    <Pressable
+                      key={d}
+                      testID={`staff-assign-${d.slice(-1)}`}
+                      disabled={assign.isPending}
+                      onPress={() => assign.mutateAsync({ id: o.id, driver: d }).catch((e) => toast.show(e.message, "error"))}
+                      style={[styles.driverBtn, mine && styles.driverBtnOn, slot && !slot.open && !mine && styles.driverBtnClosed]}
+                    >
+                      <Feather name="truck" size={18} color={mine ? colors.onSuccess : colors.onSurface} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.driverBtnText, mine && { color: colors.onSuccess }]} numberOfLines={1}>
+                          {d}{slot?.name ? ` — ${slot.name}` : ""}
+                        </Text>
+                        <Text style={[styles.driverBtnSub, mine && { color: colors.onSuccess }]} numberOfLines={1}>
+                          {slot?.open ? t("mgrOnDuty") : t("mgrShiftClosed")}
+                        </Text>
+                      </View>
+                      {mine ? <Feather name="check-circle" size={20} color={colors.onSuccess} /> : null}
+                    </Pressable>
+                  );
+                })}
               </View>
             </View>
           ) : null}
@@ -364,6 +386,11 @@ const useStyles = makeStyles((colors) => ({
   totalValue: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurface },
   pay: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.brandSecondary, letterSpacing: 0.5, marginTop: 2 },
   actionLabel: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
+  driverBtn: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 56, paddingHorizontal: 14, borderRadius: 14, borderWidth: 1.5, borderColor: colors.borderStrong, backgroundColor: colors.surfaceSecondary },
+  driverBtnOn: { backgroundColor: colors.success, borderColor: colors.success },
+  driverBtnClosed: { opacity: 0.55 },
+  driverBtnText: { fontFamily: FONT_TEXT, fontSize: 16, fontWeight: "800", color: colors.onSurface },
+  driverBtnSub: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "600", color: colors.muted, marginTop: 1 },
   minuteGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   minuteBtn: { width: "30%", flexGrow: 1, height: 64, borderRadius: 14, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center", borderWidth: 3, borderColor: colors.surfaceInverse },
   minuteBtnSel: { backgroundColor: colors.success, borderColor: colors.brandSecondary },

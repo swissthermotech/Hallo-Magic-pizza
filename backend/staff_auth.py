@@ -193,6 +193,17 @@ async def list_shifts(_: dict = Depends(require_roles("manager"))):
     return out
 
 
+@router.get("/drivers")
+async def list_drivers(_: dict = Depends(require_roles("manager", "kitchen", "phone"))):
+    """Who is on each slot right now – used for the Manager assignment buttons ("Livreur 1 — Aliou"). No PIN data."""
+    out = []
+    for role, driver in DRIVER_NAME.items():
+        sh = await open_shift(role)
+        out.append({"role": role, "driver": driver, "name": sh["name"] if sh else None, "open": bool(sh),
+                    "label": f"{driver} — {sh['name']}" if sh else driver})
+    return out
+
+
 @router.post("/shifts/{role}/open")
 async def open_shift_ep(role: str, body: ShiftOpenIn, _: dict = Depends(require_roles("manager"))):
     if role not in DRIVER_NAME:

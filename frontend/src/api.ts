@@ -341,7 +341,7 @@ export function useDriverAction() {
 
 // ---- Manager reports ----
 export interface DriverClosing {
-  driver: string; driver_name?: string | null; label?: string; date: string; deliveries: number; cancelled: number;
+  driver: string; driver_name?: string | null; label: string; identity_key: string; legacy: boolean; is_current: boolean; date: string; deliveries: number; cancelled: number;
   orders: { id: string; order_number: number; total: number; collection_method: string; payment_collected: boolean; delivered_at?: string | null; status: string; city: string }[];
   cash_expected: number; terminal_expected: number; paid_no_collection: number; total: number;
   actual_cash?: number | null; actual_terminal?: number | null; cash_difference?: number | null; terminal_difference?: number | null; closed_at?: string | null;
@@ -355,7 +355,7 @@ export function useSources(date: string) {
 export function useSaveClosing() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { date: string; driver: string; actual_cash?: number | null; actual_terminal?: number | null }) => api.post("/reports/closing", body),
+    mutationFn: (body: { date: string; driver: string; driver_name?: string | null; actual_cash?: number | null; actual_terminal?: number | null }) => api.post("/reports/closing", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["closing"] }),
   });
 }
@@ -385,3 +385,8 @@ export const shiftsApi = {
   reset: (role: string) => api.post(`/auth/staff/shifts/${role}/reset-session`, {}),
   close: (role: string) => api.post(`/auth/staff/shifts/${role}/close`, {}),
 };
+/** Current person on each driver slot (manager / kitchen / phone) – for the assignment buttons. */
+export interface DriverSlot { role: string; driver: string; name: string | null; open: boolean; label: string }
+export function useDriverSlots() {
+  return useQuery({ queryKey: ["driver-slots"], queryFn: () => api.get<DriverSlot[]>("/auth/staff/drivers"), refetchInterval: 15000 });
+}

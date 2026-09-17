@@ -437,7 +437,8 @@ class Order(BaseDocument):
     user_id: Optional[str] = None       # customer account (None = guest)
     station: Optional[int] = None       # phone orders: iPad "Poste 1" / "Poste 2"
     driver: Optional[str] = None        # delivery: "Livreur 1" / "Livreur 2" / "Livreur 3"
-    driver_name: Optional[str] = None   # shift display name at assignment time (e.g. "Marco") – kept in history
+    driver_name: Optional[str] = None   # person who did the delivery (snapshot; updated to the performer on "livrée") – kept in history
+    shift_id: Optional[str] = None      # driver_shifts id of that person's service (stable identity for reports)
     reprint_count: int = 0
     assigned_at: Optional[datetime] = None
     picked_up_at: Optional[datetime] = None
@@ -1000,7 +1001,9 @@ async def assign_driver(order_id: str, body: AssignIn, _: dict = Depends(STAFF))
     shift = await staff_mod.open_shift_for_name(body.driver)
     if not shift:
         raise HTTPException(409, f"Aucun service ouvert pour {body.driver} – ouvrez le service (Admin → Sécurité)")
-    fields = {"driver": body.driver, "driver_name": shift["name"], "assigned_at": now_utc()}
+    # Identity snapshot: the PERSON currently on this slot (name + shift id). Re-opening the slot with another
+    # person later never renames this order – historical deliveries keep the driver who did them.
+    fields = {"driver": body.driver, "driver_name": shift["name"], "shift_id": str(shift["_id"]), "assigned_at": now_utc()}
     if doc["status"] in ("ready", "assigned"):
         notif = make_notification("assigned", doc["order_number"]) if doc["status"] == "ready" else None
         return await push_status(doc, "assigned", notif, fields)
@@ -1071,7 +1074,12 @@ async def driver_delivered(order_id: str, user: dict = Depends(staff_mod.staff_u
         return Order.from_mongo(doc)
     if doc["status"] != "delivering":
         raise HTTPException(409, "Appuyez d'abord sur PARTI / EN LIVRAISON")
-    return await finish_order(doc, "delivered", make_notification("delivered", doc["order_number"]), {"delivered_at": now_utc()})
+    # The delivery is attributed to the person who actually performed it (current shift on this slot),
+    # e.g. slot re-opened for Aliou after Marco was assigned -> the delivery is Aliou's.
+    extra = {"delivered_at": now_utc()}
+    if user.get("name"):
+        extra.update({"driver_name": user["name"], "shift_id": user.get("shift_id")})
+    return await finish_order(doc, "delivered", make_notification("delivered", doc["order_number"]), extra)
 
 
 class CollectIn(BaseModel):
@@ -1098,42 +1106,87 @@ def day_range(date: Optional[str]):
     return d.isoformat(), start.astimezone(timezone.utc), (start + timedelta(days=1)).astimezone(timezone.utc)
 
 
+LEGACY_DRIVER_LABEL = "Non identifié"  # deliveries recorded before named shifts existed (no person attached)
+
+
+def slug(text: str) -> str:
+    import unicodedata
+    base = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+    return "-".join(part for part in "".join(ch if ch.isalnum() else " " for ch in base).split()) or "x"
+
+
+async def resolve_driver_identity(o: dict, shifts: List[dict]) -> Optional[str]:
+    """Person behind a delivery. Snapshot `driver_name` wins; older orders (no snapshot) are matched to the shift
+    that was open on that slot when the order was assigned. Nothing is written back – historical data is untouched."""
+    if o.get("driver_name"):
+        return o["driver_name"]
+    role = next((r for r, n in staff_mod.DRIVER_NAME.items() if n == o.get("driver")), None)
+    at = o.get("assigned_at") or o.get("delivered_at") or o.get("created_at")
+    if not role or not at:
+        return None
+    at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+    for sh in shifts:
+        if sh["role"] != role:
+            continue
+        opened = sh["opened_at"].replace(tzinfo=timezone.utc)
+        closed = (sh.get("closed_at") or sh["expires_at"]).replace(tzinfo=timezone.utc)
+        if opened <= at <= closed:
+            return sh["name"]
+    return None
+
+
 @api.get("/reports/closing")
 async def closing_report(date: Optional[str] = None, _: dict = Depends(staff_mod.require_roles("manager"))):
+    """One closing entry per real driver identity (slot + person), never per generic slot alone.
+    Re-opening a slot for another person creates a new identity; earlier deliveries stay with the earlier person."""
     day, start, end = day_range(date)
     docs = await db.orders.find({"type": "delivery", "driver": {"$ne": None}, "created_at": {"$gte": start, "$lt": end}}).to_list(2000)
-    closings = {c["driver"]: c async for c in db.closings.find({"date": day})}
+    shifts = await db.driver_shifts.find({"opened_at": {"$lt": end}}, {"pin_hash": 0, "session_id": 0}).to_list(5000)
+    closings: Dict[tuple, dict] = {(c["driver"], c.get("driver_name")): c async for c in db.closings.find({"date": day})}
+    current = {sh["role"]: sh for sh in [await staff_mod.open_shift(r) for r in staff_mod.DRIVER_NAME] if sh} if day == day_range(None)[0] else {}
+    by_identity: Dict[tuple, List[dict]] = {}
+    for o in docs:
+        by_identity.setdefault((o["driver"], await resolve_driver_identity(o, shifts)), []).append(o)
     out = []
-    groups = []
-    for name in staff_mod.DRIVER_NAME.values():
-        names = sorted({o.get("driver_name") or "" for o in docs if o.get("driver") == name}) or [""]
-        groups += [(name, n) for n in names]
-    for name, shift_name in groups:
-        mine = [o for o in docs if o.get("driver") == name and (o.get("driver_name") or "") == shift_name]
-        delivered = [o for o in mine if o["status"] in ("delivered", "completed")]
-        cancelled = [o for o in mine if o["status"] == "cancelled"]
-        cash = round(sum(o["total"] for o in delivered if (o.get("collection_method") or "cash") == "cash"), 2)
-        terminal = round(sum(o["total"] for o in delivered if o.get("collection_method") == "terminal"), 2)
-        paid = round(sum(o["total"] for o in delivered if o.get("collection_method") == "none"), 2)
-        c = closings.get(name)
-        out.append({
-            "driver": name, "driver_name": shift_name or None, "label": f"{name} — {shift_name}" if shift_name else name,
-            "date": day, "deliveries": len(delivered), "cancelled": len(cancelled),
-            "orders": [{"id": str(o["_id"]), "order_number": o["order_number"], "total": o["total"], "collection_method": o.get("collection_method") or "cash",
-                        "payment_collected": o.get("payment_collected", False), "delivered_at": o.get("delivered_at"), "status": o["status"],
-                        "city": (o.get("address") or {}).get("city", "")} for o in sorted(mine, key=lambda x: x["created_at"])],
-            "cash_expected": cash, "terminal_expected": terminal, "paid_no_collection": paid, "total": round(cash + terminal + paid, 2),
-            "actual_cash": c.get("actual_cash") if c else None, "actual_terminal": c.get("actual_terminal") if c else None,
-            "cash_difference": round(c["actual_cash"] - cash, 2) if c and c.get("actual_cash") is not None else None,
-            "terminal_difference": round(c["actual_terminal"] - terminal, 2) if c and c.get("actual_terminal") is not None else None,
-            "closed_at": c.get("closed_at") if c else None,
-        })
+    for role, slot in staff_mod.DRIVER_NAME.items():
+        cur = current.get(role)
+        names = {k[1] for k in by_identity if k[0] == slot}
+        if cur:
+            names.add(cur["name"])  # person on duty today is always listed, even before the first delivery
+        if not names:
+            names.add(None)  # nothing today on this slot -> single empty entry
+        slot_groups = len(names)
+        ordered = sorted(names, key=lambda n: (n is None, not (cur and n == cur["name"]), (n or "").lower()))
+        for name in ordered:
+            mine = by_identity.get((slot, name), [])
+            delivered = [o for o in mine if o["status"] in ("delivered", "completed")]
+            cancelled = [o for o in mine if o["status"] == "cancelled"]
+            cash = round(sum(o["total"] for o in delivered if (o.get("collection_method") or "cash") == "cash"), 2)
+            terminal = round(sum(o["total"] for o in delivered if o.get("collection_method") == "terminal"), 2)
+            paid = round(sum(o["total"] for o in delivered if o.get("collection_method") == "none"), 2)
+            # Closing record per identity; a legacy slot-only record still applies when the slot has a single identity
+            c = closings.get((slot, name)) or (closings.get((slot, None)) if (name is None or slot_groups == 1) else None)
+            out.append({
+                "driver": slot, "driver_name": name, "label": f"{slot} — {name or LEGACY_DRIVER_LABEL}",
+                "identity_key": f"{slug(slot)}__{slug(name) if name else 'legacy'}", "legacy": name is None,
+                "is_current": bool(cur and name == cur["name"]),
+                "date": day, "deliveries": len(delivered), "cancelled": len(cancelled),
+                "orders": [{"id": str(o["_id"]), "order_number": o["order_number"], "total": o["total"], "collection_method": o.get("collection_method") or "cash",
+                            "payment_collected": o.get("payment_collected", False), "delivered_at": o.get("delivered_at"), "status": o["status"],
+                            "city": (o.get("address") or {}).get("city", "")} for o in sorted(mine, key=lambda x: x["created_at"])],
+                "cash_expected": cash, "terminal_expected": terminal, "paid_no_collection": paid, "total": round(cash + terminal + paid, 2),
+                "actual_cash": c.get("actual_cash") if c else None, "actual_terminal": c.get("actual_terminal") if c else None,
+                "cash_difference": round(c["actual_cash"] - cash, 2) if c and c.get("actual_cash") is not None else None,
+                "terminal_difference": round(c["actual_terminal"] - terminal, 2) if c and c.get("actual_terminal") is not None else None,
+                "closed_at": c.get("closed_at") if c else None,
+            })
     return {"date": day, "drivers": out}
 
 
 class ClosingIn(BaseModel):
     date: str
     driver: str
+    driver_name: Optional[str] = None  # identity (person) – None only for legacy unnamed deliveries
     actual_cash: Optional[float] = None
     actual_terminal: Optional[float] = None
     note: Optional[str] = None
@@ -1143,7 +1196,8 @@ class ClosingIn(BaseModel):
 async def save_closing(body: ClosingIn, _: dict = Depends(staff_mod.require_roles("manager"))):
     if body.driver not in staff_mod.DRIVER_NAME.values():
         raise HTTPException(400, "Unknown driver")
-    await db.closings.update_one({"date": body.date, "driver": body.driver},
+    name = (body.driver_name or "").strip() or None
+    await db.closings.update_one({"date": body.date, "driver": body.driver, "driver_name": name},
                                  {"$set": {"actual_cash": body.actual_cash, "actual_terminal": body.actual_terminal, "note": body.note, "closed_at": now_utc()}}, upsert=True)
     return {"ok": True}
 
