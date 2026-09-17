@@ -11,12 +11,12 @@ import { useActiveOrders } from "@/src/api";
 import { useStaff } from "@/src/staff-auth";
 import { FirstDeliveryControl } from "@/src/components/first-delivery";
 import { Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
-import { OrderCard, OrderDetail } from "@/src/components/staff-order";
+import { OrderCard, OrderDetail, isScheduledLater } from "@/src/components/staff-order";
 import type { Order } from "@/src/types";
 import type { StringKey } from "@/src/i18n";
 
 const ALERT = require("../../assets/sounds/alert.wav");
-type Filter = "new" | "progress" | "done";
+type Filter = "new" | "scheduled" | "progress" | "done";
 type NavItem = { testID: string; href: string; icon: React.ComponentProps<typeof Feather>["name"]; label: StringKey; manager?: boolean };
 const NAV: NavItem[] = [
   { testID: "staff-go-kitchen", href: "/staff/kitchen", icon: "coffee", label: "kitchen" },
@@ -69,14 +69,21 @@ export default function StaffDashboard() {
   }, [data, soundOn, player]);
 
   const counts = useMemo(() => ({
-    new: orders.filter((o) => o.status === "pending").length,
-    progress: orders.filter((o) => !["pending", "completed", "cancelled"].includes(o.status)).length,
+    new: orders.filter((o) => o.status === "pending" && !isScheduledLater(o)).length,
+    scheduled: orders.filter((o) => isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)).length,
+    scheduledPending: orders.filter((o) => isScheduledLater(o) && o.status === "pending").length,
+    progress: orders.filter((o) => !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)).length,
     done: orders.filter((o) => ["completed", "cancelled"].includes(o.status)).length,
   }), [orders]);
 
-  const list = orders.filter((o) =>
-    filter === "new" ? o.status === "pending" : filter === "progress" ? !["pending", "completed", "cancelled"].includes(o.status) : ["completed", "cancelled"].includes(o.status),
-  );
+  const list = orders
+    .filter((o) =>
+      filter === "new" ? o.status === "pending" && !isScheduledLater(o)
+        : filter === "scheduled" ? isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)
+          : filter === "progress" ? !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)
+            : ["completed", "cancelled"].includes(o.status),
+    )
+    .sort((a, b) => (filter === "scheduled" ? (a.scheduled_for || "").localeCompare(b.scheduled_for || "") : 0));
   const selected = orders.find((o) => o.id === selectedId) ?? (twoCol ? list[0] : undefined);
 
   return (
@@ -108,18 +115,19 @@ export default function StaffDashboard() {
       {alert ? (
         <Animated.View entering={FadeInDown} exiting={FadeOutUp} style={styles.alert} testID="new-order-alert">
           <Feather name="bell" size={22} color={colors.onBrandPrimary} />
-          <Text style={styles.alertText}>{t("orderReceived")} #{alert.order_number} · {alert.customer.first_name} · {alert.type === "pickup" ? t("pickup") : t("delivery")}</Text>
-          <Pressable testID="new-order-alert-open" onPress={() => { setFilter("new"); setSelectedId(alert.id); setAlert(null); }} style={styles.alertBtn}><Text style={styles.alertBtnText}>{t("edit").toUpperCase()}</Text></Pressable>
+          <Text style={styles.alertText}>{t("orderReceived")} #{alert.order_number} · {alert.customer.first_name} · {alert.type === "pickup" ? t("pickup") : t("delivery")}{isScheduledLater(alert) ? ` · ${t("scheduled").toUpperCase()} ${alert.requested_date} ${alert.requested_time}` : ""}</Text>
+          <Pressable testID="new-order-alert-open" onPress={() => { setFilter(isScheduledLater(alert) ? "scheduled" : "new"); setSelectedId(alert.id); setAlert(null); }} style={styles.alertBtn}><Text style={styles.alertBtnText}>{t("edit").toUpperCase()}</Text></Pressable>
         </Animated.View>
       ) : null}
 
       {/* Filters: full-width segmented control, then (manager) the collapsible first-delivery card */}
       <View style={styles.segment} testID="staff-filters">
-        {(["new", "progress", "done"] as Filter[]).map((f) => {
+        {(["new", "scheduled", "progress", "done"] as Filter[]).map((f) => {
           const on = filter === f;
-          const lbl = f === "new" ? t("newOrders") : f === "progress" ? t("inProgress") : t("done");
+          const lbl = f === "new" ? t("newOrders") : f === "scheduled" ? t("scheduled") : f === "progress" ? t("inProgress") : t("done");
+          const alert = (f === "new" && counts.new > 0) || (f === "scheduled" && counts.scheduledPending > 0);
           return (
-            <Pressable key={f} testID={`staff-filter-${f}`} onPress={() => setFilter(f)} style={[styles.segBtn, on && styles.segBtnOn, f === "new" && counts.new > 0 && !on && styles.segBtnAlert]}>
+            <Pressable key={f} testID={`staff-filter-${f}`} onPress={() => setFilter(f)} style={[styles.segBtn, twoCol && { flexBasis: "22%" }, on && styles.segBtnOn, alert && !on && styles.segBtnAlert]}>
               <Text style={[styles.segText, on && styles.segTextOn]} numberOfLines={1}>{lbl}</Text>
               <View style={[styles.segCount, on && styles.segCountOn]}><Text style={[styles.segCountText, on && styles.segCountTextOn]}>{counts[f]}</Text></View>
             </Pressable>
@@ -166,11 +174,11 @@ const useStyles = makeStyles((colors) => ({
   alertText: { flex: 1, fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.onBrandPrimary },
   alertBtn: { backgroundColor: colors.onBrandPrimary, paddingHorizontal: 14, height: 36, borderRadius: 10, justifyContent: "center" },
   alertBtnText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "800", color: colors.brandPrimary },
-  segment: { flexDirection: "row", gap: 6, margin: 12, marginBottom: 8, padding: 4, borderRadius: 16, backgroundColor: colors.surfaceTertiary },
-  segBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 44, borderRadius: 12 },
+  segment: { flexDirection: "row", flexWrap: "wrap", gap: 6, margin: 12, marginBottom: 8, padding: 4, borderRadius: 16, backgroundColor: colors.surfaceTertiary },
+  segBtn: { flexGrow: 1, flexBasis: "45%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, height: 44, borderRadius: 12, paddingHorizontal: 6 },
   segBtnOn: { backgroundColor: colors.surfaceInverse },
   segBtnAlert: { borderWidth: 1.5, borderColor: colors.brandPrimary },
-  segText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.onSurface },
+  segText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.onSurface, flexShrink: 1 },
   segTextOn: { color: colors.onSurfaceInverse },
   segCount: { minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary },
   segCountOn: { backgroundColor: colors.brandPrimary },

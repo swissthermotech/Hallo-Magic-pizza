@@ -215,6 +215,8 @@ export interface Order {
   customer: Customer;
   address?: Address | null;
   requested_time?: string | null;
+  requested_date?: string | null; // future-day (scheduled) order
+  scheduled_for?: string | null;
   general_note?: string | null;
   payment_method: string;
   language: string;

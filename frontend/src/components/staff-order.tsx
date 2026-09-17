@@ -18,6 +18,10 @@ export function sourceLabel(src: string, station?: number | null) {
   return src === "ios" ? "iPhone" : src === "android" ? "Android" : "Web";
 }
 const DRIVERS = ["Livreur 1", "Livreur 2", "Livreur 3"];
+const todayZurich = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Zurich" });
+export const isScheduledLater = (o: Order) => !!o.requested_date && o.requested_date > todayZurich();
+const DAYS_FR = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+export const fmtDay = (iso: string) => { const d = new Date(iso + "T12:00:00"); return `${DAYS_FR[d.getDay()]} ${iso.slice(8, 10)}.${iso.slice(5, 7)}.${iso.slice(0, 4)}`; };
 
 /** Compact order card for the queue list – one clearly separated block per order:
  *  1) number + status  2) source / type / age tags  3) times  4) customer  5) items  6) total + action hint */
@@ -27,8 +31,15 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
   const { t } = useI18n();
   const pending = o.status === "pending";
   const requested = o.requested_time && o.requested_time !== "asap" ? o.requested_time : null;
+  const scheduledLater = isScheduledLater(o);
   return (
     <Pressable testID={`staff-order-card-${o.id}`} onPress={onPress} style={[styles.card, selected && styles.cardSelected, pending && styles.cardPending]}>
+      {scheduledLater ? (
+        <View style={styles.schedBanner} testID={`staff-card-scheduled-${o.id}`}>
+          <Feather name="calendar" size={16} color={colors.onSurfaceInverse} />
+          <Text style={styles.schedBannerText}>{t("scheduled").toUpperCase()} · {fmtDay(o.requested_date!)} · {o.requested_time}</Text>
+        </View>
+      ) : null}
       <View style={styles.cardHead}>
         <Text style={styles.cardNum}>#{o.order_number}</Text>
         <Badge label={statusLabel(o.status, o.type, t)} tone={statusTone(o.status)} />
@@ -46,7 +57,7 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
         </View>
         <View style={styles.timeCell}>
           <Text style={styles.timeCellLabel}>{t("mgrRequested")}</Text>
-          <Text style={[styles.timeCellValue, requested && { color: colors.brandTertiary }]}>{requested ?? t("asap")}</Text>
+          <Text style={[styles.timeCellValue, requested && { color: colors.brandTertiary }]}>{scheduledLater ? `${fmtDay(o.requested_date!)} ` : ""}{requested ?? t("asap")}</Text>
         </View>
         {o.estimated_ready_at ? (
           <View style={styles.timeCell}>
@@ -156,6 +167,16 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
         {o.driver ? <Badge label={`${o.driver}${o.driver_name ? ` — ${o.driver_name}` : ""}`} tone="neutral" testID="staff-detail-driver" /> : null}
       </View>
 
+      {/* Scheduled (future-day) order: date first, impossible to confuse with today's orders */}
+      {isScheduledLater(o) ? (
+        <View style={styles.schedBox} testID="staff-detail-scheduled">
+          <Feather name="calendar" size={26} color={colors.onSurfaceInverse} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.schedTitle}>{t("scheduled").toUpperCase()} · {t("notForToday")}</Text>
+            <Text style={styles.schedDate}>{fmtDay(o.requested_date!)} · {o.requested_time}</Text>
+          </View>
+        </View>
+      ) : null}
       {/* Time block */}
       <View style={[styles.timeBox, pending && { backgroundColor: colors.warningSoft }]}>
         <View style={{ flex: 1 }}>
@@ -364,6 +385,11 @@ const useStyles = makeStyles((colors) => ({
   cardCta: { flexDirection: "row", alignItems: "center", gap: 4, height: 36, paddingLeft: 12, paddingRight: 6, borderRadius: 18, backgroundColor: colors.surfaceTertiary },
   cardCtaPending: { backgroundColor: colors.brandPrimary },
   cardCtaText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.onSurface, textTransform: "uppercase", letterSpacing: 0.4 },
+  schedBanner: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.surfaceInverse, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  schedBannerText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "900", color: colors.onSurfaceInverse, letterSpacing: 0.5 },
+  schedBox: { flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.surfaceInverse, borderRadius: 14, padding: 14 },
+  schedTitle: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "900", color: colors.onSurfaceInverse, letterSpacing: 0.8, opacity: 0.85 },
+  schedDate: { fontFamily: FONT_DISPLAY, fontSize: 24, color: colors.onSurfaceInverse, marginTop: 2 },
   detailHead: { flexDirection: "row", alignItems: "center", gap: 12 },
   detailNum: { fontFamily: FONT_DISPLAY, fontSize: 34, color: colors.onSurface },
   detailMeta: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },

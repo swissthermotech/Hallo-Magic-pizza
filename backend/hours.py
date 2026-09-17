@@ -85,4 +85,37 @@ def ordering_status(settings, now: datetime, step: int = 15) -> dict:
                 break
     return {"open_now": pickup_open, "pickup_open": pickup_open, "delivery_open": delivery_open,
             "delivery_from": _fmt(delivery_from) if delivery_from is not None else None, "next_open": next_open,
-            "pickup_slots": pickup_slots, "delivery_slots": delivery_slots, "day": day}
+            "pickup_slots": pickup_slots, "delivery_slots": delivery_slots, "day": day,
+            "days": upcoming_days(settings, now, step)}
+
+
+def slots_for_day(settings, day_date, now: datetime, step: int = 15) -> Tuple[List[str], List[str]]:
+    """Valid pickup / delivery slots for a calendar day. Today: at least 30 min from now; future days: full windows."""
+    oh = settings.opening_hours or {}
+    cutoff = getattr(settings, "delivery_cutoff_minutes", 15) or 15
+    fd = getattr(settings, "first_delivery", {}) or {}
+    today = day_date == now.date()
+    cur = now.hour * 60 + now.minute if today else -1
+    pickup, delivery = [], []
+    for a, b in windows(oh, DAYS[day_date.weekday()]):
+        fdl = first_delivery_for(fd, (a, b)) if today else a  # the manager's "first delivery" override is a same-day control
+        t = ((max(cur + 30, a) + step - 1) // step) * step
+        while t <= b:
+            pickup.append(_fmt(t))
+            if fdl is not None and t >= fdl and t <= b - cutoff:
+                delivery.append(_fmt(t))
+            t += step
+    return pickup, delivery
+
+
+def upcoming_days(settings, now: datetime, step: int = 15, horizon: int = 7) -> List[dict]:
+    """Scheduled ordering: the next `horizon` calendar days that still have at least one slot (closed days are skipped)."""
+    out = []
+    for i in range(0, horizon + 1):
+        d = (now + timedelta(days=i)).date()
+        p, dl = slots_for_day(settings, d, now, step)
+        if not p:
+            continue
+        out.append({"date": d.isoformat(), "weekday": DAY_FR[DAYS[d.weekday()]], "is_today": i == 0, "is_tomorrow": i == 1,
+                    "pickup_slots": p, "delivery_slots": dl})
+    return out

@@ -45,13 +45,27 @@ export default function CheckoutScreen() {
   const [f, setF] = useState({ first_name: "", last_name: "", phone: "", email: "", street: "", number: "", npa: "", city: "", instructions: "" });
   const [ageOk, setAgeOk] = useState(false);
   const { data: ordering } = useOrderingStatus();
+  // Scheduled ordering: a day (today + up to 7 days, closed days skipped) and only valid slots for that day
+  const days = useMemo(() => ordering?.days ?? [], [ordering]);
+  const [chosenDay, setChosenDay] = useState<string | null>(null);
+  const hasSlots = (d: { pickup_slots: string[]; delivery_slots: string[] }) => (type === "delivery" ? d.delivery_slots : d.pickup_slots).length > 0;
+  // Default day = first day that still has slots (ordering at 00:00 -> tomorrow); the customer can pick any listed day
+  const dayIdx = Math.max(0, chosenDay ? days.findIndex((d) => d.date === chosenDay) : days.findIndex(hasSlots));
+  const day = days[dayIdx] ?? days[0];
+  const isFutureDay = !!day && !day.is_today;
+  const pickDay = (i: number) => { setChosenDay(days[i].date); setTime(""); };
   // Only valid slots from the server schedule (opening hours, 15-min delivery cutoff, manager "first delivery")
-  const slots = useMemo(() => (ordering ? (type === "delivery" ? ordering.delivery_slots : ordering.pickup_slots) : timeSlots()), [ordering, type]);
+  const slots = useMemo(() => {
+    if (day) return type === "delivery" ? day.delivery_slots : day.pickup_slots;
+    return ordering ? (type === "delivery" ? ordering.delivery_slots : ordering.pickup_slots) : timeSlots();
+  }, [ordering, type, day]);
   const asapAvailable = !ordering || (type === "pickup" ? ordering.pickup_open : ordering.delivery_open);
   const closedNow = !!ordering && !ordering.pickup_open;
   useEffect(() => {
     if (!asapAvailable && timeMode === "asap") setTimeMode("scheduled");
   }, [asapAvailable, timeMode]);
+  const dayLabel = (d: { date: string; weekday: string; is_today: boolean; is_tomorrow: boolean }) =>
+    d.is_today ? t("today") : d.is_tomorrow ? t("tomorrow") : `${d.weekday} ${d.date.slice(8, 10)}.${d.date.slice(5, 7)}`;
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
   // Optional account: prefill contact details + saved addresses (guest checkout unchanged)
@@ -95,6 +109,7 @@ export default function CheckoutScreen() {
         customer: { first_name: f.first_name.trim(), last_name: f.last_name.trim(), phone: f.phone.trim(), email: f.email.trim() || undefined },
         address: type === "delivery" ? { street: f.street.trim(), number: f.number.trim(), npa: f.npa.trim(), city: f.city.trim(), instructions: f.instructions.trim() || undefined } : undefined,
         requested_time: requestedTime,
+        requested_date: timeMode === "scheduled" && isFutureDay ? day.date : null,
         general_note: cart.generalNote.trim() || undefined,
         age_confirmed: ageOk,
         save_address: !!user && type === "delivery" && !savedAddrId && saveAddress,
@@ -154,6 +169,15 @@ export default function CheckoutScreen() {
           </View>
           {timeMode === "scheduled" ? (
             <>
+              {days.length > 1 ? (
+                <View style={[styles.slots, { marginBottom: 10 }]} testID="day-picker">
+                  {days.map((d, i) => (
+                    <Pressable key={d.date} testID={`day-${d.date}`} onPress={() => pickDay(i)} style={[styles.slot, dayIdx === i && styles.slotActive]}>
+                      <Text style={[styles.slotText, dayIdx === i && styles.slotTextActive]}>{dayLabel(d)}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              ) : null}
               <View style={styles.slots}>
                 {slots.length === 0 ? <Text style={styles.hint}>{t("restaurantClosed")}{ordering?.next_open ? ` – ${ordering.next_open}` : ""}</Text> : null}
                 {slots.map((s) => (
@@ -162,7 +186,7 @@ export default function CheckoutScreen() {
                   </Pressable>
                 ))}
               </View>
-              <Text style={[styles.hint, { marginTop: 10 }]}>{t("notGuaranteed")}</Text>
+              <Text style={[styles.hint, { marginTop: 10 }]} testID="scheduled-hint">{isFutureDay && day ? `${t("scheduledFor")} ${dayLabel(day)} (${day.date})${time ? ` · ${time}` : ""}. ` : ""}{t("notGuaranteed")}</Text>
             </>
           ) : null}
         </View>

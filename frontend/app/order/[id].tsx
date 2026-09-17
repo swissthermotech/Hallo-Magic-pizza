@@ -49,12 +49,14 @@ export default function OrderScreen() {
           ) : pending ? (
             <>
               <ActivityIndicator color={colors.onSurfaceInverse} />
-              <Text style={styles.heroTitle}>{t("waitingConfirmation")}</Text>
-              {requested ? <Text style={styles.heroSub}>{o.type === "pickup" ? t("requestedPickup") : t("requestedDelivery")}: {requested}</Text> : <Text style={styles.heroSub}>{t("asap")}</Text>}
+              <Text style={styles.heroTitle} testID="order-received-title">{t("orderReceivedTitle")} · {t("waitingConfirmation")}</Text>
+              <Text style={styles.heroSub}>{o.requested_date ? t("scheduledReceivedBody") : t("orderReceivedBody")}</Text>
+              {requested ? <Text style={styles.heroSub}>{o.type === "pickup" ? t("requestedPickup") : t("requestedDelivery")}: {o.requested_date ? `${o.requested_date} · ` : ""}{requested}</Text> : <Text style={styles.heroSub}>{t("asap")}</Text>}
             </>
           ) : (
             <>
-              <Text style={styles.heroLabel}>{o.type === "pickup" ? t("acceptedReadyAt") : t("acceptedDeliveryAt")}</Text>
+              <Text style={styles.heroLabel}>{t("orderConfirmedTitle")} · {o.type === "pickup" ? t("acceptedReadyAt") : t("acceptedDeliveryAt")}</Text>
+              {o.requested_date ? <Text style={styles.heroSub} testID="order-scheduled-date">{t("scheduledFor")} {o.requested_date}</Text> : null}
               <Text style={styles.heroTime} testID="order-eta-time">{fmtTime(o.estimated_ready_at)}</Text>
               {mins !== null && mins > 0 && !["ready", "picked_up", "delivered", "completed"].includes(o.status) ? <Text style={styles.heroSub}>≈ {mins} min</Text> : null}
               {o.time_changed && requested ? (

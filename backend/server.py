@@ -335,6 +335,7 @@ class OrderIn(BaseModel):
     customer: CustomerIn
     address: Optional[AddressIn] = None
     requested_time: Optional[str] = None  # "asap" or "HH:MM"
+    requested_date: Optional[str] = None  # "YYYY-MM-DD" (Europe/Zurich) – omitted/today = same-day order; future = scheduled order
     general_note: Optional[str] = None
     age_confirmed: bool = False
     save_address: bool = False  # logged-in customers: store the delivery address in the profile
@@ -429,6 +430,8 @@ class Order(BaseDocument):
     customer: CustomerIn
     address: Optional[AddressIn] = None
     requested_time: Optional[str] = None
+    requested_date: Optional[str] = None   # "YYYY-MM-DD" local; set only for orders placed for a future day
+    scheduled_for: Optional[datetime] = None  # requested date + time (UTC) – sorting / "Programmées" section
     general_note: Optional[str] = None
     payment_method: str
     language: str = "fr"
@@ -789,8 +792,28 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
     """Validates the cart against the live catalog and builds the full Order (prices + frozen VAT snapshot).
     Shared by customer checkout (/orders) and staff phone orders (/phone-orders)."""
     settings = await get_settings()
-    if enforce_hours:
-        st = hours_mod.ordering_status(settings, datetime.now(TZ))
+    local_now = datetime.now(TZ)
+    # Scheduled (future-day) order? Validate the date/time against the opening hours of THAT day.
+    sched_date = None
+    if body.requested_date:
+        try:
+            sched_date = datetime.strptime(body.requested_date, "%Y-%m-%d").date()
+        except ValueError:
+            raise HTTPException(400, "Date invalide")
+        if sched_date < local_now.date():
+            raise HTTPException(400, "Date passée")
+        if sched_date == local_now.date():
+            sched_date = None  # same-day order: normal rules below
+    if sched_date:
+        if (sched_date - local_now.date()).days > 7:
+            raise HTTPException(400, "Commande possible au maximum 7 jours à l'avance")
+        if not body.requested_time or body.requested_time == "asap":
+            raise HTTPException(400, "Choisissez une heure pour une commande programmée")
+        p_slots, d_slots = hours_mod.slots_for_day(settings, sched_date, local_now)
+        if body.requested_time.strip() not in (p_slots if body.type == "pickup" else d_slots):
+            raise HTTPException(400, "Créneau non disponible ce jour-là – choisissez un créneau proposé")
+    elif enforce_hours:
+        st = hours_mod.ordering_status(settings, local_now)
         if not body.requested_time or body.requested_time == "asap":
             if body.type == "pickup" and not st["pickup_open"]:
                 raise HTTPException(400, f"Restaurant fermé – prochaine ouverture {st['next_open'] or '–'}")
@@ -915,10 +938,15 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
 
     number = await next_order_number()
     ts = now_utc()
+    scheduled_for = None
+    if sched_date:
+        h, m = [int(x) for x in body.requested_time.strip().split(":")]
+        scheduled_for = datetime(sched_date.year, sched_date.month, sched_date.day, h, m, tzinfo=TZ).astimezone(timezone.utc)
     return Order(
         order_number=number, type=body.type, source=body.source, status="pending", items=items,
         customer=body.customer, address=body.address if body.type == "delivery" else None,
-        requested_time=body.requested_time, general_note=body.general_note or None,
+        requested_time=body.requested_time, requested_date=sched_date.isoformat() if sched_date else None, scheduled_for=scheduled_for,
+        general_note=body.general_note or None,
         payment_method="pay_at_delivery" if body.type == "delivery" else "pay_at_pickup",
         language=body.language, age_confirmed=bool(age_req) and body.age_confirmed, age_required=age_req,
         user_id=str(user["_id"]) if user else None,
@@ -944,7 +972,8 @@ async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.op
 @api.post("/phone-orders", response_model=Order)
 async def create_phone_order(body: PhoneOrderIn, _: dict = Depends(PHONE)):
     """Staff-entered phone order: same catalog, prices, VAT snapshot, ticket and receipt as any other order.
-    Created directly as ACCEPTED (staff confirmed it on the phone) and printed once immediately."""
+    Created as PENDING like every other order: it appears in the Manager queue and is NOT printed here.
+    The ONLY initial ticket is produced when the Manager taps "Accepter et confirmer" (POST /orders/{id}/accept)."""
     if body.station not in (1, 2):
         raise HTTPException(400, "station must be 1 or 2")
     if body.client_request_id:
@@ -956,30 +985,16 @@ async def create_phone_order(body: PhoneOrderIn, _: dict = Depends(PHONE)):
     customer = await db.users.find_one({"_id": oid(body.customer_id)}) if body.customer_id else None
     body.source = "telephone"
     body.age_confirmed = True  # staff informs the caller; the 16+/18+ ID check happens at handover (ticket + dashboard warning)
+    if (not body.requested_time or body.requested_time == "asap") and body.minutes is not None and not body.requested_date:
+        # "in N minutes" agreed on the phone -> stored as the requested time so the Manager can confirm it in one tap
+        body.requested_time = fmt_time(now_utc() + timedelta(minutes=body.minutes))
     order = await compute_order(body, customer, enforce_minimum=False, allow_half=True, enforce_hours=False)  # staff overrides: minimum, hours, half/half
-    ts = now_utc()
-    if body.requested_time and body.requested_time != "asap":
-        ready = parse_local_time(body.requested_time)
-        minutes = max(0, int((ready - ts).total_seconds() // 60))
-    else:
-        minutes = body.minutes if body.minutes is not None else 30
-        ready = ts + timedelta(minutes=minutes)
     doc = order.to_mongo()
-    doc.update({
-        "status": "accepted", "station": body.station, "payment_method": body.payment_method, "accepted_at": ts, "client_request_id": body.client_request_id,
-        **collection_fields(body.payment_method, order.total),
-        "estimated_minutes": minutes, "estimated_ready_at": ready, "time_changed": False,
-        "status_history": [StatusEvent(status="pending", at=ts).model_dump(), StatusEvent(status="accepted", at=ts).model_dump()],
-        "notifications": [make_notification("order_received", order.order_number), make_notification("order_accepted", order.order_number, t=fmt_time(ready))],
-    })
+    doc.update({"station": body.station, "payment_method": body.payment_method, "client_request_id": body.client_request_id,
+                **collection_fields(body.payment_method, order.total)})
     res = await db.orders.insert_one(doc)
     if customer and body.save_address and body.type == "delivery" and body.address:
         await auth_mod.save_address_for_user(customer, body.address.model_dump())
-    # One kitchen print job (same pipeline / duplicate guard as the dashboard "accept")
-    try:
-        await do_print(await load_order(str(res.inserted_id)), force=False)
-    except HTTPException:
-        pass
     return Order.from_mongo(await load_order(str(res.inserted_id)))
 
 
@@ -1278,16 +1293,28 @@ class StatusIn(BaseModel):
     status: str
 
 
-def parse_local_time(hhmm: str) -> datetime:
+def parse_local_time(hhmm: str, on_date: Optional[str] = None) -> datetime:
     try:
         h, m = [int(x) for x in hhmm.strip().split(":")]
     except Exception:
         raise HTTPException(400, "Invalid time, expected HH:MM")
     local_now = datetime.now(TZ)
+    if on_date:  # scheduled order: the time belongs to its requested day
+        d = datetime.strptime(on_date, "%Y-%m-%d").date()
+        return datetime(d.year, d.month, d.day, h, m, tzinfo=TZ).astimezone(timezone.utc)
     target = local_now.replace(hour=h, minute=m, second=0, microsecond=0)
     if target < local_now - timedelta(hours=2):
         target += timedelta(days=1)
     return target.astimezone(timezone.utc)
+
+
+def fmt_date(dt: Optional[datetime]) -> str:
+    if not dt:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    local = dt.astimezone(TZ)
+    return f"{hours_mod.DAY_FR[hours_mod.DAYS[local.weekday()]]} {local.strftime('%d.%m.%Y')}"
 
 
 # ---------------------------------------------------------------------------
@@ -1426,27 +1453,39 @@ async def finish_order(doc: dict, status: str, notif: Optional[dict], extra_set:
 
 @api.post("/orders/{order_id}/accept", response_model=Order)
 async def accept_order(order_id: str, body: AcceptIn, _: dict = Depends(STAFF)):
+    """THE ONLY place that produces the initial kitchen ticket. Atomic pending->accepted transition: a second
+    tap / retry / other device gets 400 (not pending) and can never create a second job."""
     doc = await load_order(order_id)
     if doc["status"] != "pending":
         raise HTTPException(400, "Order is not pending")
     ts = now_utc()
+    sched = doc.get("scheduled_for")
+    if sched and sched.tzinfo is None:
+        sched = sched.replace(tzinfo=timezone.utc)
     if body.time:
-        ready = parse_local_time(body.time)
+        ready = parse_local_time(body.time, on_date=doc.get("requested_date"))
         minutes = max(0, int((ready - ts).total_seconds() // 60))
     elif body.minutes is not None:
         minutes = body.minutes
-        ready = ts + timedelta(minutes=minutes)
+        ready = (sched + timedelta(minutes=minutes)) if sched and sched > ts else ts + timedelta(minutes=minutes)  # scheduled: relative to the requested slot
     else:
         raise HTTPException(400, "minutes or time required")
     requested = doc.get("requested_time")
     changed = bool(requested and requested != "asap" and fmt_time(ready) != requested)
-    notif = make_notification("order_accepted", doc["order_number"], t=fmt_time(ready))
-    order = await push_status(doc, "accepted", notif, {"accepted_at": ts, "estimated_minutes": minutes, "estimated_ready_at": ready, "time_changed": changed})
+    notif = make_notification("order_accepted", doc["order_number"], t=(fmt_date(ready) + " " if doc.get("requested_date") else "") + fmt_time(ready))
+    # Atomic claim: only the request that flips pending -> accepted continues (and prints)
+    claimed = await db.orders.find_one_and_update(
+        {"_id": doc["_id"], "status": "pending"},
+        {"$set": {"status": "accepted", "accepted_at": ts, "estimated_minutes": minutes, "estimated_ready_at": ready, "time_changed": changed},
+         "$push": {"status_history": StatusEvent(status="accepted", at=ts).model_dump(), "notifications": notif}},
+        return_document=ReturnDocument.AFTER)
+    if not claimed:
+        raise HTTPException(400, "Order is not pending")
+    order = Order.from_mongo(claimed)
     # Automatic kitchen print on acceptance (idempotent: skipped if already printed)
     try:
-        fresh = await load_order(order_id)
-        if not fresh.get("printed"):
-            await do_print(fresh, force=False)
+        if not claimed.get("printed"):
+            await do_print(claimed, force=False)
             order = Order.from_mongo(await load_order(order_id))
     except HTTPException:
         pass
@@ -1534,11 +1573,19 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
         lines += [c("*** REIMPRESSION ***"), "=" * W]
     lines += ["", big("LIVRAISON" if o["type"] == "delivery" else "RETRAIT"), "", big(f"#{o['order_number']}"), ""]
     when = fmt_time(o.get("estimated_ready_at")) if o.get("estimated_ready_at") else (o.get("requested_time") if o.get("requested_time") not in (None, "asap") else "DES QUE POSSIBLE")
+    ready_dt = o.get("estimated_ready_at") or o.get("scheduled_for")
+    if ready_dt and ready_dt.tzinfo is None:
+        ready_dt = ready_dt.replace(tzinfo=timezone.utc)
+    scheduled = bool(ready_dt) and ready_dt.astimezone(TZ).date() != datetime.now(TZ).date()
+    if scheduled:
+        # Future-day order: the DATE is the first thing the kitchen must see – never confused with today's tickets
+        day_txt = fmt_date(ready_dt).upper()
+        lines += ["#" * W, c("*** COMMANDE PROGRAMMEE ***"), c("PAS POUR AUJOURD'HUI"), "", big("DATE"), c(day_txt), "", big("HEURE " + when), "#" * W]
     lines += [c(("LIVRAISON " if o["type"] == "delivery" else "PRET ") + when), "=" * W]
     src = f"TELEPHONE - POSTE {o.get('station') or 1}" if o.get("source") == "telephone" else o.get("source", "web").upper()
     lines.append(f"Source: {src}")
     if o.get("requested_time") and o["requested_time"] != "asap":
-        lines.append(f"Souhaite: {o['requested_time']}")
+        lines.append(f"Souhaite: {(fmt_date(o['scheduled_for']) + ' ') if o.get('scheduled_for') else ''}{o['requested_time']}")
     if o.get("driver"):
         lines += ["", "*" * W, big(o["driver"].upper())] + ([c(f"— {o['driver_name'].upper()} —")] if o.get("driver_name") else []) + ["*" * W]
     if o.get("age_required"):

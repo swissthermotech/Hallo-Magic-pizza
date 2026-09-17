@@ -130,6 +130,7 @@ export interface PlaceOrderPayload {
   customer: Customer;
   address?: Address;
   requested_time?: string;
+  requested_date?: string | null; // YYYY-MM-DD for a future day (scheduled order)
   general_note?: string;
   age_confirmed: boolean;
   save_address?: boolean;
@@ -155,6 +156,7 @@ export function usePlaceOrder() {
         customer: p.customer,
         address: p.address,
         requested_time: p.requested_time,
+        requested_date: p.requested_date ?? null,
         general_note: p.general_note,
         age_confirmed: p.age_confirmed,
         save_address: !!p.save_address,
@@ -284,6 +286,7 @@ export function usePlacePhoneOrder() {
         customer: p.customer,
         address: p.address,
         requested_time: p.requested_time,
+        requested_date: p.requested_date ?? null,
         general_note: p.general_note,
         age_confirmed: true,
         save_address: !!p.save_address,
@@ -366,7 +369,8 @@ export const staffPins = {
 };
 
 // ---- Ordering hours / first delivery ----
-export interface OrderingStatus { open_now: boolean; pickup_open: boolean; delivery_open: boolean; delivery_from?: string | null; next_open?: string | null; pickup_slots: string[]; delivery_slots: string[] }
+export interface OrderingDay { date: string; weekday: string; is_today: boolean; is_tomorrow: boolean; pickup_slots: string[]; delivery_slots: string[] }
+export interface OrderingStatus { open_now: boolean; pickup_open: boolean; delivery_open: boolean; delivery_from?: string | null; next_open?: string | null; pickup_slots: string[]; delivery_slots: string[]; days: OrderingDay[] }
 export function useOrderingStatus() {
   return useQuery({ queryKey: ["ordering"], queryFn: () => api.get<OrderingStatus>("/settings/ordering"), refetchInterval: 60000 });
 }
