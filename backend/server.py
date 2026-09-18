@@ -906,10 +906,11 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
     elif enforce_hours:
         st = hours_mod.ordering_status(settings, local_now)
         if not body.requested_time or body.requested_time == "asap":
-            if body.type == "pickup" and not st["pickup_open"]:
+            # ASAP is allowed while open AND before an opening later today (= first available time after opening)
+            if body.type == "pickup" and not st["asap_pickup"]:
                 raise HTTPException(400, f"Restaurant fermé – prochaine ouverture {st['next_open'] or '–'}")
-            if body.type == "delivery" and not st["delivery_open"]:
-                raise HTTPException(400, "Livraison indisponible pour le moment – le retrait reste possible jusqu'à la fermeture" if st["pickup_open"] else f"Restaurant fermé – prochaine ouverture {st['next_open'] or '–'}")
+            if body.type == "delivery" and not st["asap_delivery"]:
+                raise HTTPException(400, "Livraison indisponible pour le moment – le retrait reste possible jusqu'à la fermeture" if st["asap_pickup"] else f"Restaurant fermé – prochaine ouverture {st['next_open'] or '–'}")
         else:
             slots = st["pickup_slots"] if body.type == "pickup" else st["delivery_slots"]
             if body.requested_time.strip() not in slots:
@@ -946,6 +947,9 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         allowed = set(pdoc.get("allowed_extra_ids", []))
         ex_list: List[OrderExtra] = []
         ex_sum = 0.0
+        # Size chosen for this line (same rule as below: unknown/missing key -> first size); drives per-size supplement prices
+        _sizes = pdoc.get("sizes") or []
+        size_key = (next((sd for sd in _sizes if sd["key"] == it.size_key), None) or _sizes[0])["key"] if _sizes else None
         for ex in it.extras:
             edoc = extras_by_id.get(ex.extra_id)
             if not edoc or (edoc["key"] not in allowed and ex.extra_id not in allowed):
@@ -954,7 +958,7 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
             ex_rate = edoc.get("vat_rate")
             if ex_rate is None:
                 ex_rate = settings.vat_rate_standard
-            ex_price = extra_price(edoc, size.key if size else None)
+            ex_price = extra_price(edoc, size_key)
             eg, en, ev = split_vat(ex_price * eqty * qty, ex_rate)
             vat_groups[ex_rate] = vat_groups.get(ex_rate, 0.0) + eg
             ex_list.append(OrderExtra(extra_id=ex.extra_id, name=I18n(**edoc["name"]), unit_price=ex_price, quantity=eqty,
@@ -1572,7 +1576,14 @@ async def accept_order(order_id: str, body: AcceptIn, _: dict = Depends(STAFF)):
         minutes = max(0, int((ready - ts).total_seconds() // 60))
     elif body.minutes is not None:
         minutes = body.minutes
-        ready = (sched + timedelta(minutes=minutes)) if sched and sched > ts else ts + timedelta(minutes=minutes)  # scheduled: relative to the requested slot
+        base = ts
+        if sched and sched > ts:
+            base = sched  # scheduled: relative to the requested slot
+        else:
+            st = hours_mod.ordering_status(await get_settings(), datetime.now(TZ))
+            if st.get("asap_from") and not st["pickup_open"]:
+                base = parse_local_time(st["asap_from"])  # accepted before opening: "15 min" = 15 min after opening
+        ready = base + timedelta(minutes=minutes)
     else:
         raise HTTPException(400, "minutes or time required")
     requested = doc.get("requested_time")

@@ -380,7 +380,7 @@ export const staffPins = {
 
 // ---- Ordering hours / first delivery ----
 export interface OrderingDay { date: string; weekday: string; is_today: boolean; is_tomorrow: boolean; pickup_slots: string[]; delivery_slots: string[] }
-export interface OrderingStatus { open_now: boolean; pickup_open: boolean; delivery_open: boolean; delivery_from?: string | null; next_open?: string | null; pickup_slots: string[]; delivery_slots: string[]; days: OrderingDay[] }
+export interface OrderingStatus { open_now: boolean; pickup_open: boolean; delivery_open: boolean; asap_pickup?: boolean; asap_delivery?: boolean; asap_from?: string | null; delivery_from?: string | null; next_open?: string | null; pickup_slots: string[]; delivery_slots: string[]; days: OrderingDay[] }
 export function useOrderingStatus() {
   return useQuery({ queryKey: ["ordering"], queryFn: () => api.get<OrderingStatus>("/settings/ordering"), refetchInterval: 60000 });
 }

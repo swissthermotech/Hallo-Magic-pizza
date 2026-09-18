@@ -131,3 +131,8 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Menu admin: categories screen (/staff/admin/categories: FR/DE, ▲▼ order, active, new); product editor: ordre d'affichage, mise en avant (Pizza du moment / Créez votre pizza – listed first via GET /menu ranking), visible from/until dates; extras: per-size prices `price_by_size` {32,40,50} used by compute_order + customer product screen (re-priced on size change).
 - Homepage carousel: Settings.hero_images (admin Photos d'accueil via PhotoManager); `HeroCarousel` shown only when photos exist.
 - Backup: GET /admin/export (manager) → JSON download/share from Settings.
+
+## Iteration 16 (2026-06) – checkout 500 fix + pre-opening ASAP
+- Checkout "Erreur": `compute_order` referenced `size` before assignment (introduced with per-size supplement prices) → HTTP 500 for every web order. Fixed (size key resolved before the extras loop). E2E verified (create → list → accept w/ pre-flag → ticket) with 0 real prints.
+- ASAP before opening: `hours.ordering_status` returns `asap_pickup / asap_delivery / asap_from`; backend accepts "asap" when an opening exists later today; checkout keeps "Dès que possible · 11:00" enabled with a hint; Manager quick minutes count from opening time when accepted before opening.
+- Supplement MAX is per line item (`min(qty, max_quantity)` per pizza) – unchanged. Per-size prices verified in stored order + ticket.

@@ -59,8 +59,10 @@ export default function CheckoutScreen() {
     if (day) return type === "delivery" ? day.delivery_slots : day.pickup_slots;
     return ordering ? (type === "delivery" ? ordering.delivery_slots : ordering.pickup_slots) : timeSlots();
   }, [ordering, type, day]);
-  const asapAvailable = !ordering || (type === "pickup" ? ordering.pickup_open : ordering.delivery_open);
-  const closedNow = !!ordering && !ordering.pickup_open;
+  // ASAP = open now OR an opening later today (then it means "first available time after opening")
+  const asapAvailable = !ordering || (type === "pickup" ? ordering.asap_pickup ?? ordering.pickup_open : ordering.asap_delivery ?? ordering.delivery_open);
+  const asapFrom = ordering && !ordering.pickup_open ? ordering.asap_from : null;
+  const closedNow = !!ordering && !ordering.pickup_open && !ordering.asap_pickup;
   useEffect(() => {
     if (!asapAvailable && timeMode === "asap") setTimeMode("scheduled");
   }, [asapAvailable, timeMode]);
@@ -149,6 +151,8 @@ export default function CheckoutScreen() {
               <Feather name="clock" size={16} color={colors.onError} />
               <Text style={styles.closedText}>{t("restaurantClosed")}{ordering?.next_open ? ` · ${t("nextOpening")}: ${ordering.next_open}` : ""}</Text>
             </View>
+          ) : asapFrom ? (
+            <Text style={styles.hint} testID="checkout-asap-from">{t("asapFromOpening")} {asapFrom}</Text>
           ) : type === "delivery" && ordering && !ordering.delivery_open ? (
             <View style={[styles.closedBox, { backgroundColor: colors.warning }]} testID="checkout-delivery-unavailable">
               <Feather name="truck" size={16} color={colors.onWarning} />
@@ -160,7 +164,7 @@ export default function CheckoutScreen() {
           <View style={[styles.segment, { marginBottom: 12 }]} testID="time-mode-segment">
             <Pressable testID="time-mode-asap" disabled={!asapAvailable} onPress={() => setTimeMode("asap")} style={[styles.segBtn, { height: 44 }, timeMode === "asap" && styles.segBtnActive, !asapAvailable && { opacity: 0.4 }]}>
               <Feather name="zap" size={16} color={timeMode === "asap" ? colors.onSurfaceInverse : colors.onSurface} />
-              <Text style={[styles.segText, { fontSize: 13 }, timeMode === "asap" && styles.segTextActive]}>{t("asap")}</Text>
+              <Text style={[styles.segText, { fontSize: 13 }, timeMode === "asap" && styles.segTextActive]} numberOfLines={2}>{t("asap")}{asapFrom ? ` · ${asapFrom}` : ""}</Text>
             </Pressable>
             <Pressable testID="time-mode-scheduled" onPress={() => setTimeMode("scheduled")} style={[styles.segBtn, { height: 44 }, timeMode === "scheduled" && styles.segBtnActive]}>
               <Feather name="clock" size={16} color={timeMode === "scheduled" ? colors.onSurfaceInverse : colors.onSurface} />

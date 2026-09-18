@@ -83,7 +83,17 @@ def ordering_status(settings, now: datetime, step: int = 15) -> dict:
                 break
             if next_open:
                 break
+    # "Dès que possible" BEFORE opening: the order is accepted now and means "first available time after opening today"
+    asap_pickup, asap_delivery, asap_from = pickup_open, delivery_open, None
+    if not pickup_open:
+        for a, b in windows(oh, day):
+            if a > cur:
+                asap_pickup, asap_from = True, a
+                fdl = first_delivery_for(fd, (a, b))
+                asap_delivery = fdl is not None and fdl <= b - cutoff
+                break
     return {"open_now": pickup_open, "pickup_open": pickup_open, "delivery_open": delivery_open,
+            "asap_pickup": asap_pickup, "asap_delivery": asap_delivery, "asap_from": _fmt(asap_from) if asap_from is not None else None,
             "delivery_from": _fmt(delivery_from) if delivery_from is not None else None, "next_open": next_open,
             "pickup_slots": pickup_slots, "delivery_slots": delivery_slots, "day": day,
             "days": upcoming_days(settings, now, step)}
