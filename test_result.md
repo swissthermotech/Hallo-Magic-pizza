@@ -107,3 +107,8 @@
 - Manager PIN 1234 at /staff/login. Dashboard /staff: tabs NOUVELLES / EN COURS / PROGRAMMÉES / HISTORIQUE, cards with inline actions, "Activer le son" banner (web autoplay unlock), Détails modal.
 - Admin: /staff/admin → categories (delete only when empty), products (editor: Option sans gluten/sans lactose switches), extras (delete button in editor), Pizza du mois highlight chip.
 - Customer: category chips Tout / Entrées / Pizza / Créer votre pizza / Piadina & Pasta / Dessert / Boissons (NO "Pizza sans gluten"). Gluten-free = dough option inside pizza detail (+CHF 4, 32 cm only).
+
+## Iteration 21/22 – phone-order auto-print + data cleanup + Clôture check (main agent notes)
+- PRINTNODE IS LIVE. Do NOT create orders via POST /api/phone-orders (prints immediately) unless the key is disabled. For any order creation test, main agent must disable the key first (currently LIVE – testing agent must NOT create/accept orders; READ-ONLY verification of Clôture only).
+- Cleanup done: 610 automated test orders, 229 TEST_ users, 84 closed "Test*" driver shifts deleted. 46 orders remain (manual test orders by the restaurant team).
+- Clôture livreurs: GET /api/reports/closing?date=YYYY-MM-DD (manager). Semantics: "livraisons" = orders with status delivered/completed assigned to that driver identity that day; "commandes" list = ALL orders assigned that day (incl. en cours / annulées). Money totals only over delivered/completed.

@@ -100,7 +100,7 @@ function DriverBlock({ d }: { d: DriverClosing }) {
       {d.closed_at ? <Text style={styles.small}>✓ {t("saved")} {fmtTime(d.closed_at)}</Text> : null}
 
       {d.orders.length ? (
-        <Pressable testID={`closing-toggle-${k}`} onPress={() => setOpen((v) => !v)} style={styles.row}><Text style={styles.link}>{open ? "−" : "+"} {d.orders.length} {t("orders").toLowerCase()}</Text></Pressable>
+        <Pressable testID={`closing-toggle-${k}`} onPress={() => setOpen((v) => !v)} style={styles.row}><Text style={styles.link}>{open ? "−" : "+"} {d.orders.length} {t("orders").toLowerCase()} · {d.deliveries} {t("deliveries")}{d.orders.length - d.deliveries - d.cancelled > 0 ? ` · ${d.orders.length - d.deliveries - d.cancelled} ${t("inProgress").toLowerCase()}` : ""}{d.cancelled ? ` · ${d.cancelled} ${t("status_cancelled").toLowerCase()}` : ""}</Text></Pressable>
       ) : null}
       {open ? d.orders.map((o) => (
         <View key={o.id} style={styles.row}>

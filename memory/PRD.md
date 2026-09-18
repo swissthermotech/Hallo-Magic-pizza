@@ -164,3 +164,9 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - POST /api/phone-orders now inserts the order then calls accept_order() in-process with the agreed time (exact HH:MM → time; ASAP → minutes from Poste chips 15/20/30/45/60, default 30). Order goes straight to EN COURS, exactly ONE kitchen ticket via the same do_print idempotency; header TELEPHONE - POSTE 1/2 unchanged; Manager can still cancel from Détails. client_request_id double tap still returns the same order (no 2nd print).
 - Poste panel: minute chips in ASAP mode; success sheet shows confirmed time + print status. Verified simulated (key temporarily removed, then restored): 1 print job per order, correct ticket header. Test orders deleted.
 - Real phone orders #1464/#1465 (created before the change) are still PENDING in NOUVELLES – Manager must accept them once.
+
+## Iteration 22 – test-data cleanup + Clôture verification (testing agent iter 12: all PASS, read-only)
+- Deleted: 610 automated test orders (TEST*/Test/Demo/Regression/Sec/NoKey/H/P/G/Anna-pytest) + 401 print jobs, 229 TEST_ users, 84 closed "Test*" driver shifts. Kept 46 manual orders by the team (berisha/Berisha/Ema/Fisnik/Sarah/Aliou/Simo/Mohamed/David/Jean/…): uncertain → reported.
+- Left untouched (reported): #1387 (cancelled) & #1388 (completed) on 2026-09-17 assigned to dev driver identity "Test" (Livreur 3); pending phone orders #1464/#1465.
+- Clôture: livraisons = delivered/completed only; commandes list = all assigned that day; money over delivered only – math verified 0 mismatches. Label now "N commandes · M livraisons · K en cours · C annulées".
+- Production URLs: <domain>/ customer · /staff/login (PIN → Manager|Cuisine) · /phone-orders (PIN Téléphone or Manager, Poste chosen on device) · /staff/login → /driver (Livreur PINs from Admin → Sécurité).
