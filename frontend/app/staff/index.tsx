@@ -108,7 +108,7 @@ export default function StaffDashboard() {
 
   return (
     <View style={styles.screen}>
-      {/* Compact header: back · title · navigation · sound · lock (one row on wide screens) */}
+      {/* Header: back · title · sound · lock, then the full navigation row */}
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
         <View style={styles.headerRow}>
           <Pressable testID="staff-back" onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/more"))} style={styles.iconBtn}><Feather name="arrow-left" size={20} color={colors.onSurface} /></Pressable>
@@ -116,13 +116,14 @@ export default function StaffDashboard() {
             <Text style={styles.title} testID="staff-dashboard-title" numberOfLines={1}>{t("dashboard")}</Text>
             <Text style={styles.subtitle} numberOfLines={1}>{label}</Text>
           </View>
-          {wide ? <NavRow role={role} /> : <View style={{ flex: 1 }} />}
+          <View style={{ flex: 1 }} />
           <Pressable testID="staff-sound-toggle" onPress={() => (soundUnlocked ? setSoundOn((v) => !v) : unlockSound())} style={[styles.iconBtn, soundOn && soundUnlocked && styles.iconBtnOn]}>
             <Feather name={soundOn && soundUnlocked ? "volume-2" : "volume-x"} size={20} color={soundOn && soundUnlocked ? colors.onBrandPrimary : colors.onSurface} />
           </Pressable>
           <Pressable testID="staff-lock" onPress={() => { lock(); router.replace("/(tabs)/more"); }} style={styles.iconBtn}><Feather name="lock" size={18} color={colors.onSurface} /></Pressable>
         </View>
-        {!wide ? <NavRow role={role} /> : null}
+        {/* Navigation: always its own full-width row that WRAPS – every entry (incl. Administration) stays visible */}
+        <NavRow role={role} />
       </View>
 
       {/* Sound must be enabled by a tap on web browsers (autoplay policy) – one clear button, once per session */}
@@ -193,14 +194,14 @@ function NavRow({ role }: { role: string | null }) {
   const { t } = useI18n();
   const router = useRouter();
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={styles.navRow}>
+    <View style={styles.navRow}>
       {NAV.filter((n) => !n.manager || role === "manager").map((n) => (
-        <Pressable key={n.testID} testID={n.testID} onPress={() => router.push(n.href as any)} style={styles.navBtn}>
-          <Feather name={n.icon} size={16} color={colors.onSurface} />
-          <Text style={styles.navText}>{t(n.label)}</Text>
+        <Pressable key={n.testID} testID={n.testID} onPress={() => router.push(n.href as any)} style={[styles.navBtn, n.testID === "staff-go-admin" && styles.navBtnAdmin]}>
+          <Feather name={n.icon} size={16} color={n.testID === "staff-go-admin" ? colors.onSurfaceInverse : colors.onSurface} />
+          <Text style={[styles.navText, n.testID === "staff-go-admin" && { color: colors.onSurfaceInverse }]}>{t(n.label)}</Text>
         </Pressable>
       ))}
-    </ScrollView>
+    </View>
   );
 }
 
@@ -212,7 +213,8 @@ const useStyles = makeStyles((colors) => ({
   subtitle: { fontFamily: FONT_TEXT, fontSize: 11, color: colors.muted },
   iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   iconBtnOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
-  navRow: { gap: 8, paddingHorizontal: 12, alignItems: "center" },
+  navRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 12, alignItems: "center" },
+  navBtnAdmin: { backgroundColor: colors.surfaceInverse, borderColor: colors.surfaceInverse },
   navBtn: { flexDirection: "row", alignItems: "center", gap: 6, height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
   navText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.onSurface },
   soundBanner: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.warning, padding: 12, marginHorizontal: 12, marginTop: 10, borderRadius: 14 },
