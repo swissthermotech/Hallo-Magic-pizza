@@ -34,7 +34,7 @@ export default function CartScreen() {
         <Empty icon="shopping-bag" title={t("emptyCart")} hint={t("emptyCartHint")} action={<Button title={t("browseMenu")} onPress={() => router.push("/(tabs)")} testID="cart-browse-menu-button" />} />
       ) : (
         <>
-          <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 200 }} bottomOffset={220} showsVerticalScrollIndicator={false}>
+          <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 200, width: "100%", maxWidth: 760, alignSelf: "center" }} bottomOffset={220} showsVerticalScrollIndicator={false}>
             {cart.items.map((it) => (
               <View key={it.line_id} style={styles.item} testID={`cart-item-${it.line_id}`}>
                 <Image source={{ uri: imgUri(it.image_url) }} style={styles.img} contentFit="cover" />
@@ -88,7 +88,9 @@ export default function CartScreen() {
           </KeyboardAwareScrollView>
 
           <View style={[styles.cta, { paddingBottom: 16 }]}>
-            <Button title={`${t("checkout")} · ${chf(goods)}`} size="lg" icon="arrow-right" onPress={() => router.push("/checkout")} testID="cart-checkout-button" />
+            <View style={{ width: "100%", maxWidth: 760 }}>
+              <Button title={`${t("checkout")} · ${chf(goods)}`} size="lg" icon="arrow-right" onPress={() => router.push("/checkout")} testID="cart-checkout-button" />
+            </View>
           </View>
         </>
       )}
@@ -129,5 +131,5 @@ const useStyles = makeStyles((colors) => ({
   totalLabel: { fontFamily: FONT_DISPLAY, fontSize: 22, color: colors.onSurfaceInverse },
   totalValue: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurfaceInverse },
   paymentHint: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.onSurfaceInverse, opacity: 0.7, marginTop: 4 },
-  cta: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
+  cta: { position: "absolute", left: 0, right: 0, bottom: 0, alignItems: "center", paddingHorizontal: 16, paddingTop: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
 }));

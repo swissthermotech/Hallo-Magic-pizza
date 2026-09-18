@@ -101,3 +101,9 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## Iteration 20 (final polish) – main agent notes for testing agent
+- PRINTING IS SIMULATED (PRINTNODE_API_KEY temporarily removed) – accepting orders is safe. Still: create as FEW test orders as possible, customer first_name must start with "TEST_" so they can be deleted afterwards.
+- Do NOT run backend pytest suites in /app/backend/tests.
+- Manager PIN 1234 at /staff/login. Dashboard /staff: tabs NOUVELLES / EN COURS / PROGRAMMÉES / HISTORIQUE, cards with inline actions, "Activer le son" banner (web autoplay unlock), Détails modal.
+- Admin: /staff/admin → categories (delete only when empty), products (editor: Option sans gluten/sans lactose switches), extras (delete button in editor), Pizza du mois highlight chip.
+- Customer: category chips Tout / Entrées / Pizza / Créer votre pizza / Piadina & Pasta / Dessert / Boissons (NO "Pizza sans gluten"). Gluten-free = dough option inside pizza detail (+CHF 4, 32 cm only).

@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, SectionList, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, SectionList, Text, useWindowDimensions, View } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,7 +11,7 @@ import { useI18n } from "@/src/i18n";
 import { imgUri, useMenu } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { ProductCard } from "@/src/components/product-card";
-import { Button, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
+import { Button, Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
 import { HeroCarousel } from "@/src/components/hero-carousel";
 import type { OrderType, Product } from "@/src/types";
 
@@ -76,20 +76,23 @@ export default function MenuScreen() {
   const { t, tx } = useI18n();
   const { data, isLoading, isError, refetch } = useMenu();
   const [cat, setCat] = useState<string>("all");
-  const listRef = useRef<SectionList<Product>>(null);
+  const listRef = useRef<SectionList<Product[]>>(null);
+  const { width } = useWindowDimensions();
+  // Responsive product grid: 1 column on phones, 2 on tablets, 3 on desktop (content capped at MAX_W)
+  const cols = width >= 1100 ? 3 : width >= 680 ? 2 : 1;
 
   const sections = useMemo(() => {
     if (!data) return [];
-    const cats = cat === "all" ? data.categories.filter((c) => !c.filter) : data.categories.filter((c) => c.id === cat);
+    const cats = cat === "all" ? data.categories.filter((c) => !c.filter && c.active !== false) : data.categories.filter((c) => c.id === cat);
     return cats
-      .map((c) => ({
-        id: c.id,
-        title: tx(c.name),
-        filter: c.filter ?? null,
-        data: c.filter ? data.products.filter((p) => p.options.some((o) => o.key === c.filter)) : data.products.filter((p) => p.category_id === c.id),
-      }))
-      .filter((s) => s.data.length > 0);
-  }, [data, cat, tx]);
+      .map((c) => {
+        const products = c.filter ? data.products.filter((p) => p.options.some((o) => o.key === c.filter)) : data.products.filter((p) => p.category_id === c.id);
+        const rows: Product[][] = [];
+        for (let i = 0; i < products.length; i += cols) rows.push(products.slice(i, i + cols));
+        return { id: c.id, title: tx(c.name), filter: c.filter ?? null, count: products.length, data: rows };
+      })
+      .filter((s) => s.count > 0);
+  }, [data, cat, tx, cols]);
 
   const selectCat = (id: string) => {
     Haptics.selectionAsync().catch(() => {});
@@ -111,16 +114,16 @@ export default function MenuScreen() {
     <View style={styles.screen}>
       {/* Sticky chrome: brand + language + compact category rail */}
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <View style={styles.headerRow}>
+        <View style={[styles.headerRow, styles.maxW]}>
           <View style={styles.brandRow}>
             <View style={styles.logoDot}><Text style={styles.logoText}>H</Text></View>
             <Text style={styles.brand} testID="home-title">Hallo Magic Pizza</Text>
           </View>
           <LanguageToggle />
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} style={styles.chipRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, width >= MAX_W && { minWidth: "100%", justifyContent: "center" }]} style={styles.chipRow}>
           <CatChip label={t("all")} selected={cat === "all"} onPress={() => selectCat("all")} testID="category-chip-all" />
-          {data?.categories.map((c) => (
+          {data?.categories.filter((c) => !c.filter && c.active !== false).map((c) => (
             <CatChip key={c.id} label={tx(c.name)} selected={cat === c.id} onPress={() => selectCat(c.id)} testID={`category-chip-${c.slug}`} />
           ))}
         </ScrollView>
@@ -137,9 +140,10 @@ export default function MenuScreen() {
         <SectionList
           ref={listRef}
           sections={sections}
-          keyExtractor={(p) => p.id}
+          keyExtractor={(row) => row[0].id}
           stickySectionHeadersEnabled={false}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
+          ListEmptyComponent={<Empty icon="coffee" title={t("emptyCategory")} />}
+          contentContainerStyle={[{ paddingHorizontal: 16, paddingBottom: 24 }, styles.maxW]}
           ListHeaderComponent={
             cat === "all" ? (
               <Animated.View entering={FadeInDown.duration(500)}>
@@ -176,10 +180,18 @@ export default function MenuScreen() {
             <View style={styles.sectionHead}>
               <Text style={styles.sectionTitle} testID={`section-${section.id}`}>{section.title}</Text>
               <View style={styles.sectionLine} />
+              <Text style={styles.sectionCount}>{section.count}</Text>
             </View>
           )}
-          renderItem={({ item, index, section }) => (
-            <ProductCard product={item} index={index} onPress={() => router.push({ pathname: "/product/[id]", params: section.filter ? { id: item.id, option: section.filter } : { id: item.id } })} />
+          renderItem={({ item: row, index, section }) => (
+            <View style={styles.gridRow}>
+              {row.map((item, i) => (
+                <View key={item.id} style={{ flex: 1 }}>
+                  <ProductCard product={item} index={index * cols + i} onPress={() => router.push({ pathname: "/product/[id]", params: section.filter ? { id: item.id, option: section.filter } : { id: item.id } })} />
+                </View>
+              ))}
+              {row.length < cols ? Array.from({ length: cols - row.length }).map((_, i) => <View key={`f${i}`} style={{ flex: 1 }} />) : null}
+            </View>
           )}
         />
       )}
@@ -196,8 +208,12 @@ function CatChip({ label, selected, onPress, testID }: { label: string; selected
   );
 }
 
+const MAX_W = 1120;
 const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
+  maxW: { width: "100%", maxWidth: MAX_W, alignSelf: "center" },
+  gridRow: { flexDirection: "row", gap: 16 },
+  sectionCount: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.muted },
   header: { backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border },
   headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 4, height: 52 },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
@@ -211,11 +227,11 @@ const useStyles = makeStyles((colors) => ({
   langText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.muted },
   langTextInverse: { color: colors.onSurfaceInverse },
   langTextActive: { color: colors.onSurfaceInverse },
-  chipRow: { height: 52 },
+  chipRow: { height: 56 },
   chips: { gap: 8, paddingHorizontal: 16, alignItems: "center" },
-  chip: { height: 34, paddingHorizontal: 14, borderRadius: 999, backgroundColor: colors.surfaceTertiary, justifyContent: "center", flexShrink: 0 },
+  chip: { height: 38, paddingHorizontal: 16, borderRadius: 999, backgroundColor: colors.surfaceTertiary, justifyContent: "center", flexShrink: 0 },
   chipOn: { backgroundColor: colors.brandPrimary },
-  chipText: { fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.onSurfaceTertiary },
+  chipText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "700", color: colors.onSurfaceTertiary },
   chipTextOn: { color: colors.onBrandPrimary },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, padding: 24 },
   errorText: { fontFamily: FONT_TEXT, color: colors.muted, fontSize: 16 },

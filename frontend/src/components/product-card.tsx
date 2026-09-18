@@ -45,6 +45,12 @@ export function ProductCard({ product, onPress, index = 0 }: { product: Product;
         <Image source={{ uri: imgUri(product.image_url) }} style={styles.img} contentFit="cover" transition={300} />
         <LinearGradient colors={[colors.scrimTransparent, colors.scrim]} start={{ x: 0.5, y: 0.35 }} end={{ x: 0.5, y: 1 }} style={styles.scrim} />
         <View style={styles.topBadges}>
+          {product.highlight === "moment" ? (
+            <View style={styles.pillBrand} testID={`product-month-${product.id}`}>
+              <Feather name="star" size={11} color={colors.onBrandPrimary} />
+              <Text style={styles.pillBrandText}>{t("pizzaOfMonth")}</Text>
+            </View>
+          ) : null}
           {product.is_alcohol ? <View style={styles.pillDark}><Text style={styles.pillDarkText}>{product.alcohol_type === "spirits" ? "18+" : "16+"}</Text></View> : null}
           {product.customizable ? (
             <View style={styles.pillDark}>
@@ -92,6 +98,8 @@ const useStyles = makeStyles((colors) => ({
   topBadges: { position: "absolute", top: 12, left: 12, flexDirection: "row", gap: 6 },
   pillDark: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.overlay, borderRadius: 999, paddingHorizontal: 10, height: 26 },
   pillDarkText: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "800", color: colors.onSurfaceInverse, letterSpacing: 0.4 },
+  pillBrand: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: colors.brandPrimary, borderRadius: 999, paddingHorizontal: 10, height: 26 },
+  pillBrandText: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "900", color: colors.onBrandPrimary, letterSpacing: 0.8 },
   overlayBottom: { position: "absolute", left: 16, right: 16, bottom: 14, flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 10 },
   name: { fontFamily: FONT_DISPLAY, fontSize: 24, color: colors.onSurfaceInverse, flex: 1 },
   pricePill: { backgroundColor: colors.surface, borderRadius: 999, paddingHorizontal: 12, height: 32, justifyContent: "center" },

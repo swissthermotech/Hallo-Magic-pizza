@@ -5,7 +5,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useMenu, useSaveExtra } from "@/src/api";
+import { useDeleteExtra, useMenu, useSaveExtra } from "@/src/api";
 import { chf } from "@/src/format";
 import { Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast, VatPicker } from "@/src/components/ui";
 import type { Extra } from "@/src/types";
@@ -18,6 +18,7 @@ export default function ExtrasScreen() {
   const toast = useToast();
   const { data } = useMenu(0);
   const save = useSaveExtra();
+  const del = useDeleteExtra();
   const [edit, setEdit] = useState<Partial<Extra> | null>(null);
 
   // Per-size supplement prices (32 / 40 / 50 cm) – empty field = use the default price
@@ -60,6 +61,7 @@ export default function ExtrasScreen() {
               <Button title={t("close")} variant="outline" onPress={() => setEdit(null)} style={{ flex: 1 }} testID="extra-cancel" />
               <Button title={t("save")} loading={save.isPending} onPress={submit} style={{ flex: 2 }} testID="extra-save" />
             </View>
+            {edit.id ? <Button title={t("deleteExtra")} variant="outline" icon="trash-2" loading={del.isPending} onPress={() => del.mutateAsync(edit.id!).then(() => { toast.show(t("deleteExtra"), "info"); setEdit(null); }).catch((e) => toast.show(e.message, "error"))} testID="extra-delete" /> : null}
           </View>
         ) : null}
         {(data?.extras ?? []).map((e) => (

@@ -5,7 +5,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useMenu, useSaveCategory } from "@/src/api";
+import { useDeleteCategory, useMenu, useSaveCategory } from "@/src/api";
 import { Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
 import type { Category } from "@/src/types";
 
@@ -18,6 +18,7 @@ export default function CategoriesScreen() {
   const toast = useToast();
   const { data } = useMenu(0);
   const save = useSaveCategory();
+  const del = useDeleteCategory();
   const [edit, setEdit] = useState<Partial<Category> | null>(null);
   const cats = [...(data?.categories ?? [])].sort((a, b) => a.sort - b.sort);
   const body = (c: Category, patch: Partial<Category>): Omit<Category, "id"> => ({ slug: c.slug, name: c.name, sort: c.sort, image_url: c.image_url ?? null, active: c.active, filter: c.filter ?? null, ...patch });
@@ -50,6 +51,7 @@ export default function CategoriesScreen() {
               <Button title={t("close")} variant="outline" onPress={() => setEdit(null)} style={{ flex: 1 }} testID="category-cancel" />
               <Button title={t("save")} loading={save.isPending} onPress={submit} style={{ flex: 2 }} testID="category-save" />
             </View>
+            {edit.id && !(data?.products ?? []).some((p) => p.category_id === edit.id) ? <Button title={t("deleteCategory")} variant="outline" icon="trash-2" loading={del.isPending} onPress={() => del.mutateAsync(edit.id!).then(() => { toast.show(t("deleteCategory"), "info"); setEdit(null); }).catch((e) => toast.show(e.message, "error"))} testID="category-delete" /> : null}
           </View>
         ) : null}
         {cats.map((c, i) => (

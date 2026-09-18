@@ -175,8 +175,9 @@ export default function ProductScreen() {
           <Pressable testID="product-close-button" onPress={() => router.back()} style={[styles.closeBtn, { top: insets.top + 8 }]} hitSlop={8}>
             <Feather name="x" size={20} color={colors.onSurface} />
           </Pressable>
-          <View style={styles.heroText}>
+          <View style={[styles.heroText, styles.maxW]}>
             <View style={{ flexDirection: "row", gap: 8, marginBottom: 8 }}>
+              {product.highlight === "moment" ? <Badge label={t("pizzaOfMonth")} tone="brand" /> : null}
               {product.is_alcohol ? <Badge label={`${product.alcohol_type === "spirits" ? 18 : 16}+`} tone="warning" /> : null}
               {!product.available ? <Badge label={t("soldOut")} tone="error" /> : null}
             </View>
@@ -185,7 +186,7 @@ export default function ProductScreen() {
           </View>
         </View>
 
-        <View style={styles.content}>
+        <View style={[styles.content, styles.maxW]}>
           <Text style={styles.desc} testID="product-detail-description">{tx(product.description)}</Text>
 
           {product.wine ? (
@@ -296,12 +297,14 @@ export default function ProductScreen() {
 
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
         <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
+          <View style={[styles.ctaInner, styles.maxW]}>
           <View style={{ flex: 1 }}>
             <Text style={styles.ctaLabel}>{t("total")}{size ? ` · ${size.label}` : ""}</Text>
             <Text style={styles.ctaPrice} testID="product-live-total">{chf(total)}</Text>
             {extrasSum + optionsSum > 0 ? <Text style={styles.ctaExtras}>+ {chf(extrasSum + optionsSum)} {t("options").toLowerCase()} / {t("each")}</Text> : null}
           </View>
           <Button title={editing ? t("save") : t("addToCart")} icon="shopping-bag" size="lg" onPress={submit} disabled={!product.available} style={{ flex: 1.4 }} testID="add-to-cart-button" />
+          </View>
         </View>
       </KeyboardStickyView>
     </View>
@@ -310,13 +313,15 @@ export default function ProductScreen() {
 
 const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
+  maxW: { width: "100%", maxWidth: 760, alignSelf: "center" },
+  ctaInner: { flexDirection: "row", alignItems: "center", gap: 16 },
   center: { alignItems: "center", justifyContent: "center", gap: 16 },
   muted: { fontFamily: FONT_TEXT, color: colors.muted, fontSize: 16 },
   hero: { height: 400, backgroundColor: colors.surfaceTertiary },
   heroImg: { width: "100%", height: "100%" },
   heroScrim: { position: "absolute", left: 0, right: 0, top: 0, bottom: 0 },
   closeBtn: { position: "absolute", left: 16, width: 42, height: 42, borderRadius: 21, backgroundColor: colors.surface, alignItems: "center", justifyContent: "center", shadowColor: colors.surfaceInverse, shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 }, elevation: 3 },
-  heroText: { position: "absolute", left: 22, right: 22, bottom: 44 },
+  heroText: { position: "absolute", left: 0, right: 0, bottom: 44, paddingHorizontal: 22 },
   name: { fontFamily: FONT_DISPLAY, fontSize: 38, color: colors.onSurfaceInverse, lineHeight: 44 },
   basePrice: { fontFamily: FONT_TEXT, fontSize: 18, fontWeight: "700", color: colors.onSurfaceInverse, marginTop: 6, opacity: 0.9 },
   content: { padding: 22, paddingTop: 26, gap: 4, marginTop: -28, backgroundColor: colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
@@ -345,7 +350,7 @@ const useStyles = makeStyles((colors) => ({
   extraPrice: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted, marginTop: 2 },
   extraAdd: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.surfaceTertiary, alignItems: "center", justifyContent: "center" },
   qtyRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  cta: { position: "absolute", left: 0, right: 0, bottom: 0, flexDirection: "row", alignItems: "center", gap: 16, paddingHorizontal: 20, paddingTop: 14, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border },
+  cta: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 20, paddingTop: 14, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border },
   ctaLabel: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   ctaPrice: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurface },
   ctaExtras: { fontFamily: FONT_TEXT, fontSize: 11, color: colors.brandSecondary },

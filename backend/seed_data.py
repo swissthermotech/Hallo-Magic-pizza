@@ -46,8 +46,9 @@ def ing(fr_list):
 
 
 CATEGORIES = [
-    {"slug": "pizza", "name": {"fr": "Pizza", "de": "Pizza"}, "sort": 1, "image_url": IMG["pizza"]},
-    {"slug": "pizza-sans-gluten", "name": {"fr": "Pizza sans gluten", "de": "Glutenfreie Pizza"}, "sort": 2, "image_url": IMG["pizza6"], "filter": "gluten_free"},
+    {"slug": "entrees", "name": {"fr": "Entrées", "de": "Vorspeisen"}, "sort": 1, "image_url": None},
+    {"slug": "pizza", "name": {"fr": "Pizza", "de": "Pizza"}, "sort": 2, "image_url": IMG["pizza"]},
+    # Gluten-free is NOT a category: it is the "gluten_free" dough option on each pizza (configured per product in admin)
     {"slug": "creer-votre-pizza", "name": {"fr": "Créer votre pizza", "de": "Eigene Pizza kreieren"}, "sort": 3, "image_url": IMG["custom"]},
     {"slug": "piadina-pasta", "name": {"fr": "Piadina & Pasta", "de": "Piadina & Pasta"}, "sort": 4, "image_url": IMG["pasta"]},
     {"slug": "dessert", "name": {"fr": "Dessert", "de": "Dessert"}, "sort": 5, "image_url": IMG["tiramisu"]},

@@ -42,7 +42,7 @@ export default function MoreScreen() {
         <Text style={styles.title} testID="more-title">{t("more")}</Text>
         <LanguageToggle />
       </View>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 20 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 20, width: "100%", maxWidth: 760, alignSelf: "center" }}>
         <View>
           <Text style={styles.section}>{t("account")}</Text>
           <View style={styles.card}>

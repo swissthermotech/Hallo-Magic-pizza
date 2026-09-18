@@ -10,11 +10,11 @@ import { Badge, Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useT
 import { PhotoManager } from "@/src/components/photo-manager";
 import type { AlcoholType, Product, ProductOption } from "@/src/types";
 
-const DOUGH_TEMPLATE: ProductOption[] = [
-  { key: "classic", group: "dough", name: { fr: "Pâte classique", de: "Klassischer Teig" }, price: 0, price_by_size: {}, only_sizes: [], default: true },
-  { key: "gluten_free", group: "dough", name: { fr: "Pâte sans gluten", de: "Glutenfreier Teig" }, price: 4, price_by_size: {}, only_sizes: ["32"], default: false },
-  { key: "lactose_free", group: "extra_option", name: { fr: "Sans lactose", de: "Laktosefrei" }, price: 4, price_by_size: { "32": 4, "40": 7, "50": 10 }, only_sizes: [], default: false },
-];
+// Pizza options managed with explicit switches in the editor (gluten-free dough / lactose-free)
+const CLASSIC: ProductOption = { key: "classic", group: "dough", name: { fr: "Pâte classique", de: "Klassischer Teig" }, price: 0, price_by_size: {}, only_sizes: [], default: true };
+const GLUTEN_FREE: ProductOption = { key: "gluten_free", group: "dough", name: { fr: "Pâte sans gluten", de: "Glutenfreier Teig" }, price: 4, price_by_size: {}, only_sizes: ["32"], default: false };
+const LACTOSE_FREE: ProductOption = { key: "lactose_free", group: "extra_option", name: { fr: "Sans lactose", de: "Laktosefrei" }, price: 4, price_by_size: { "32": 4, "40": 7, "50": 10 }, only_sizes: [], default: false };
+const MANAGED_KEYS = [CLASSIC.key, GLUTEN_FREE.key, LACTOSE_FREE.key];
 
 export default function ProductEditor() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -38,7 +38,11 @@ export default function ProductEditor() {
   const [alcoholType, setAlcoholType] = useState<AlcoholType>("fermented");
   const [extraPhotos, setExtraPhotos] = useState<string[]>([]);
   const [vatRate, setVatRate] = useState<number | null>(null);
-  const [pizzaOptions, setPizzaOptions] = useState(false);
+  const [glutenFree, setGlutenFree] = useState(false);
+  const [glutenPrice, setGlutenPrice] = useState("4");
+  const [glutenSizes, setGlutenSizes] = useState<string[]>(["32"]);
+  const [lactoseFree, setLactoseFree] = useState(false);
+  const [lactosePrice, setLactosePrice] = useState("4");
   const [allowed, setAllowed] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -60,7 +64,12 @@ export default function ProductEditor() {
       setAlcoholType(product.alcohol_type ?? "fermented");
       setExtraPhotos(product.images ?? []);
       setVatRate(product.vat_rate ?? null);
-      setPizzaOptions(product.options.length > 0);
+      const gf = product.options.find((o) => o.key === GLUTEN_FREE.key);
+      setGlutenFree(!!gf);
+      if (gf) { setGlutenPrice(String(gf.price)); setGlutenSizes(gf.only_sizes); }
+      const lf = product.options.find((o) => o.key === LACTOSE_FREE.key);
+      setLactoseFree(!!lf);
+      if (lf) setLactosePrice(String(lf.price));
       setAllowed(product.allowed_extra_ids);
     } else if (isNew) {
       setF((p) => ({ ...p, category: data.categories.find((c) => !c.filter)?.id ?? "" }));
@@ -69,6 +78,8 @@ export default function ProductEditor() {
   }, [data, product, isNew, loaded]);
 
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
+  const typedSizes = f.sizes.split("\n").map((l) => l.split("|")[0].trim()).filter(Boolean);
+  const sizeKeys = typedSizes.length ? typedSizes : ["32", "40", "50"];
   const extras = data?.extras ?? [];
   const allExtraKeys = extras.map((e) => e.key);
 
@@ -86,6 +97,15 @@ export default function ProductEditor() {
       const [key, label, p] = l.split("|").map((s) => s.trim());
       return { key, label: label || key, price: parseFloat((p || "0").replace(",", ".")) || 0 };
     });
+    // Options: keep any custom options, rebuild the managed ones from the switches (classic dough is the default)
+    const custom = (product?.options ?? []).filter((o) => !MANAGED_KEYS.includes(o.key));
+    const managed: ProductOption[] = [];
+    if (glutenFree) managed.push(CLASSIC, { ...GLUTEN_FREE, price: parseFloat(glutenPrice.replace(",", ".")) || 0, only_sizes: glutenSizes });
+    if (lactoseFree) {
+      const lp = parseFloat(lactosePrice.replace(",", ".")) || 0;
+      const prev = product?.options.find((o) => o.key === LACTOSE_FREE.key);
+      managed.push({ ...LACTOSE_FREE, price: lp, price_by_size: prev && prev.price === lp ? prev.price_by_size : {} });
+    }
     const body: Partial<Product> = {
       category_id: f.category,
       name: { fr: f.nameFr.trim(), de: f.nameDe.trim() || f.nameFr.trim() },
@@ -97,7 +117,7 @@ export default function ProductEditor() {
       origin: { fr: f.originFr, de: f.originDe },
       ingredients,
       sizes,
-      options: pizzaOptions ? (product?.options.length ? product.options : DOUGH_TEMPLATE) : [],
+      options: [...managed, ...custom],
       customizable,
       allowed_extra_ids: customizable ? allowed : [],
       available,
@@ -155,7 +175,7 @@ export default function ProductEditor() {
         <Text style={styles.section}>{t("price")}</Text>
         <Field label={`${t("price")} (CHF)`} value={f.price} onChangeText={set("price")} keyboardType="decimal-pad" testID="editor-price" />
         <Field label={t("sortOrder")} value={f.sort} onChangeText={set("sort")} keyboardType="number-pad" testID="editor-sort" />
-        {/* Pizza du moment / Créez votre pizza: listed first in their category; optional visibility window */}
+        {/* Pizza du mois / Créez votre pizza: listed first in their category; optional visibility window */}
         <Text style={styles.label}>{t("highlight")}</Text>
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
           {([["", "highlightNone"], ["moment", "highlightMoment"], ["custom", "highlightCustom"]] as const).map(([v, k]) => (
@@ -177,7 +197,19 @@ export default function ProductEditor() {
 
         <SwitchRow label={t("availableSwitch")} value={available} onChange={setAvailable} testID="editor-available" />
         <SwitchRow label={t("customize")} value={customizable} onChange={setCustomizable} testID="editor-customizable" />
-        <SwitchRow label={`${t("dough")} / ${t("options")} (pizza)`} value={pizzaOptions} onChange={setPizzaOptions} testID="editor-pizza-options" />
+        <SwitchRow label={t("glutenFreeOption")} value={glutenFree} onChange={setGlutenFree} testID="editor-gluten-free" />
+        {glutenFree ? (
+          <View style={styles.subBox} testID="editor-gluten-free-config">
+            <Text style={styles.hint}>{t("glutenFreeHint")}</Text>
+            <Field label={t("glutenFreePrice")} value={glutenPrice} onChangeText={setGlutenPrice} keyboardType="decimal-pad" testID="editor-gluten-price" />
+            <Text style={styles.label}>{t("glutenFreeSizes")}</Text>
+            <View style={styles.wrap}>
+              {sizeKeys.map((k) => <Chip key={k} label={`${k} cm`} selected={glutenSizes.includes(k)} onPress={() => setGlutenSizes((p) => (p.includes(k) ? p.filter((x) => x !== k) : [...p, k]))} testID={`editor-gluten-size-${k}`} />)}
+            </View>
+          </View>
+        ) : null}
+        <SwitchRow label={t("lactoseFreeOption")} value={lactoseFree} onChange={setLactoseFree} testID="editor-lactose-free" />
+        {lactoseFree ? <Field label={`${t("lactoseFreeOption")} (CHF)`} value={lactosePrice} onChangeText={setLactosePrice} keyboardType="decimal-pad" testID="editor-lactose-price" /> : null}
         <SwitchRow label={t("alcoholProduct")} value={isAlcohol} onChange={(v) => { setIsAlcohol(v); if (vatRate === null || vatRate === (v ? data.settings.vat_rate_standard : data.settings.vat_rate_alcohol)) setVatRate(v ? data.settings.vat_rate_alcohol : data.settings.vat_rate_standard); }} testID="editor-alcohol" />
         {isAlcohol ? (
           <View style={{ gap: 8 }}>
@@ -231,6 +263,8 @@ const useStyles = makeStyles((colors) => ({
   section: { fontFamily: FONT_DISPLAY, fontSize: 19, color: colors.onSurface, marginTop: 6 },
   label: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  subBox: { gap: 10, backgroundColor: colors.surfaceTertiary, borderRadius: 12, padding: 12 },
+  hint: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },
   link: { fontFamily: FONT_TEXT, color: colors.brandPrimary, fontWeight: "700" },
   switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: colors.surfaceSecondary, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, height: 52 },
   switchLabel: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "600", color: colors.onSurface },

@@ -37,7 +37,7 @@ export default function OrdersScreen() {
       {orders.length === 0 ? (
         <Empty icon="clock" title={t("noOrders")} hint={t("noOrdersHint")} action={<Button title={t("browseMenu")} onPress={() => router.push("/(tabs)")} testID="orders-browse-menu-button" />} />
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 12 }} refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.brandPrimary} />}>
+        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24, gap: 12, width: "100%", maxWidth: 760, alignSelf: "center" }} refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={colors.brandPrimary} />}>
           {orders.map((o) => (
             <Pressable key={o.id} testID={`my-order-${o.id}`} onPress={() => router.push({ pathname: "/order/[id]", params: { id: o.id } })} style={({ pressed }) => [styles.card, pressed && { opacity: 0.9 }]}>
               <View style={styles.cardHead}>

@@ -227,6 +227,22 @@ export function useSaveExtra() {
   });
 }
 
+export function useDeleteExtra() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/extras/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["menu"] }),
+  });
+}
+
+export function useDeleteCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del(`/categories/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["menu"] }),
+  });
+}
+
 export function useSaveSettings() {
   const qc = useQueryClient();
   return useMutation({

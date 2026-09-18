@@ -157,7 +157,7 @@ class Product(BaseDocument):
     wine: Optional[WineInfo] = None
     sort: int = 0
     vat_rate: Optional[float] = None  # % – None -> derived from settings (alcohol vs standard)
-    highlight: Optional[str] = None   # "moment" (Pizza du moment – listed first) | "custom" (Créez votre pizza – second) | None
+    highlight: Optional[str] = None   # "moment" (Pizza du mois – listed first) | "custom" (Créez votre pizza – second) | None
     available_from: Optional[str] = None   # "YYYY-MM-DD" – optional window (e.g. Pizza du moment); empty = no limit
     available_until: Optional[str] = None
     deleted_at: Optional[datetime] = None
@@ -543,6 +543,12 @@ async def seed():
     await db.extras.update_many({"vat_rate": None}, {"$set": {"vat_rate": s.vat_rate_standard}})
     # Alcohol group for age check: existing alcoholic products (beer, wine) are fermented -> 16+
     await db.products.update_many({"is_alcohol": True, "alcohol_type": None}, {"$set": {"alcohol_type": "fermented"}})
+    # Final menu structure: "Entrées" is a normal category; the virtual "Pizza sans gluten" tab is gone
+    # (gluten-free stays available as the gluten_free dough option on each pizza).
+    await db.categories.delete_many({"filter": "gluten_free"})
+    if not await db.categories.find_one({"slug": "entrees"}):
+        await db.categories.update_many({}, {"$inc": {"sort": 1}})
+        await db.categories.insert_one(Category(slug="entrees", name=I18n(fr="Entrées", de="Vorspeisen"), sort=1).to_mongo())
     await auth_mod.ensure_indexes()
     await staff_mod.seed_staff_pins()
     cur = await db.settings.find_one({"_id": "main"})
@@ -630,6 +636,17 @@ async def update_category(cat_id: str, body: CategoryIn, _: dict = Depends(MANAG
     if not doc:
         raise HTTPException(404, "Category not found")
     return Category.from_mongo(doc)
+
+
+@api.delete("/categories/{cat_id}")
+async def delete_category(cat_id: str, _: dict = Depends(MANAGER)):
+    """Only empty categories can be deleted – move or delete its products first."""
+    if await db.products.count_documents({"category_id": cat_id, "deleted_at": None}) > 0:
+        raise HTTPException(400, "La catégorie contient encore des produits")
+    res = await db.categories.delete_one({"_id": oid(cat_id)})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Category not found")
+    return {"ok": True}
 
 
 @api.get("/products", response_model=List[Product])
@@ -1692,12 +1709,16 @@ def escpos_big(text: str, scale: int = 3, w: Optional[int] = None, h: Optional[i
 
 
 def escpos_item(qty_size: str, name: str) -> List[str]:
-    """Pizza line, whole line BOLD at 2× (21 columns on 80 mm): '1x 50 CM FORESTIÈRE' on ONE line when it fits,
-    otherwise '1x 50 CM' then the name on the next 2× line (the printer wraps names longer than 21 columns)."""
+    """Pizza line, always BOLD and on ONE line whenever it fits the 80 mm paper:
+    - ≤ 21 chars → 2× width + height ('1x 50 CM FORESTIÈRE')
+    - ≤ 42 chars → double height, normal width ('1x 50 CM QUATTRO FORMAGGI SPECIALE')
+    - longer      → '1x 50 CM' (2×) then the name on the next double-height line (printer wraps beyond 42 cols)."""
     full = f"{qty_size} {name}".strip()
     if len(full) <= 21:
         return [f"\x1bE\x01\x1d!\x11{full}{ESC_RESET}"]
-    return [f"\x1bE\x01\x1d!\x11{qty_size}{ESC_RESET}", f"\x1bE\x01\x1d!\x11 {name}{ESC_RESET}"]
+    if len(full) <= 42:
+        return [f"\x1bE\x01\x1d!\x01{full}{ESC_RESET}"]
+    return [f"\x1bE\x01\x1d!\x11{qty_size}{ESC_RESET}", f"\x1bE\x01\x1d!\x01 {name}{ESC_RESET}"]
 
 
 def strip_escpos(text: str) -> str:

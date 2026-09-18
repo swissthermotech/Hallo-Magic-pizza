@@ -132,7 +132,7 @@ export default function CheckoutScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader title={t("checkout")} subtitle={`${cart.count} ${t("items").toLowerCase()} · ${chf(goods)}`} testID="checkout-title" />
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: CTA_H + 16, gap: 20 }} bottomOffset={CTA_H + 16} showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: CTA_H + 16, gap: 20, width: "100%", maxWidth: 760, alignSelf: "center" }} bottomOffset={CTA_H + 16} showsVerticalScrollIndicator={false}>
         {/* Order type */}
         <OrderTypeSelector />
         {type === "delivery" && settings ? (
@@ -270,8 +270,10 @@ export default function CheckoutScreen() {
 
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
         <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
-          <Button title={`${t("confirmOrder")} · ${chf(total)}`} size="lg" icon="check" onPress={submit} loading={place.isPending} testID="confirm-order-button" />
-          <Text style={styles.ctaHint}>{type === "pickup" ? t("payAtPickup") : t("payAtDelivery")}</Text>
+          <View style={{ width: "100%", maxWidth: 760, gap: 6 }}>
+            <Button title={`${t("confirmOrder")} · ${chf(total)}`} size="lg" icon="check" onPress={submit} loading={place.isPending} testID="confirm-order-button" />
+            <Text style={styles.ctaHint}>{type === "pickup" ? t("payAtPickup") : t("payAtDelivery")}</Text>
+          </View>
         </View>
       </KeyboardStickyView>
     </View>
@@ -324,6 +326,6 @@ const useStyles = makeStyles((colors) => ({
   divider: { height: 1, backgroundColor: colors.divider, marginVertical: 4 },
   totalLabel: { fontFamily: FONT_DISPLAY, fontSize: 20, color: colors.onSurface },
   totalValue: { fontFamily: FONT_DISPLAY, fontSize: 22, color: colors.brandPrimary },
-  cta: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 12, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border, gap: 6 },
+  cta: { position: "absolute", left: 0, right: 0, bottom: 0, alignItems: "center", paddingHorizontal: 16, paddingTop: 12, backgroundColor: colors.surfaceSecondary, borderTopWidth: 1, borderTopColor: colors.border, gap: 6 },
   ctaHint: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted, textAlign: "center" },
 }));
