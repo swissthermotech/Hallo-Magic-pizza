@@ -139,3 +139,6 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 
 ## Iteration 17 – ticket layout final
 - build_ticket now emits real ESC/POS sizes: `escpos_big(text, 3)` (3x bold centered) for LIVRAISON/RETRAIT, order #, requested/confirmed times, amount; `escpos_big(text, 2)` for labels (DES QUE POSSIBLE, HEURE DEMANDEE, CONFIRMEE, DEJA PAYE / A ENCAISSER / ESPECES|TERMINAL, driver, pizza sizes). No blank lines at the top. `strip_escpos()` for app previews / accept response. QR unchanged (delivery only). Print trigger/idempotency untouched. Verified with synthetic dicts only – 0 print jobs.
+
+## Iteration 18 – kitchen ticket FINAL layout
+- W=42 (TM-T70 font A). LIVRAISON = 4x bold white-on-black band between # lines; RETRAIT = 4x bold between * lines. Order # 2x. Timing: ASAP → 2x "DES QUE POSSIBLE" + 2x "CONFIRMEE" + 4x time; requested → 2x "LIVRAISON|RETRAIT HH:MM" (+ "CONFIRMEE HH:MM" if changed) + 4x time; scheduled block 2x + 4x time. Items: `escpos_item` = "1x 50 CM" at 2x + name double-height on one line; supplements/options normal indented. Payment/driver double-height. Driver QR + URL removed from the printed ticket and from send_to_printer (escpos_qr unused). Code page: ESC t 16 (WPC1252) + cp1252 encoding → accents OK. No logic changes, 0 print jobs.

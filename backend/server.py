@@ -1464,13 +1464,11 @@ async def send_to_printer(order_doc: dict, text: str, kind: str = "kitchen") -> 
     try:
         import base64
         import requests  # PrintNode REST API
-        esc = "\x1b@" + text + "\n\n\n\n\x1dV\x00"  # ESC/POS init + cut
+        # ESC @ init, ESC t 16 = code page WPC1252 (accents É È À Ô print correctly), text encoded in cp1252, then cut.
+        esc = "\x1b@\x1bt\x10" + text + "\n\n\n\n\x1dV\x00"
         payload = {"printerId": int(PRINTNODE_PRINTER_ID), "title": f"Commande #{order_doc['order_number']}",
                    "contentType": "raw_base64", "content": base64.b64encode(esc.encode("cp1252", "replace")).decode(),
                    "source": "Hallo Magic Pizza"}
-        if kind in ("kitchen", "reprint") and order_doc["type"] == "delivery":
-            esc = "\x1b@" + text + "\n" + escpos_qr(f"/driver?o={order_doc['_id']}") + "\n\n\n\n\x1dV\x00"
-            payload["content"] = base64.b64encode(esc.encode("cp1252", "replace")).decode()
         r = requests.post("https://api.printnode.com/printjobs", json=payload, auth=(PRINTNODE_API_KEY, ""), timeout=10)
         job["status"] = "sent" if r.ok else "failed"
         job["provider_response"] = r.text[:500]
@@ -1682,77 +1680,93 @@ async def set_status(order_id: str, body: StatusIn, _: dict = Depends(STAFF)):
 ESC_RESET = "\x1d!\x00\x1bE\x00\x1ba\x00"  # normal size, bold off, left align
 
 
-def escpos_big(text: str, scale: int = 3) -> str:
-    """One centered BOLD line printed at `scale`x width/height (Epson GS ! n). Falls back to normal text in previews."""
-    n = ((scale - 1) << 4) | (scale - 1)
-    return f"\x1ba\x01\x1bE\x01\x1d!{chr(n)}{text}{ESC_RESET}"
+def escpos_big(text: str, scale: int = 3, w: Optional[int] = None, h: Optional[int] = None, reverse: bool = False) -> str:
+    """One centered BOLD line at w×h character size (Epson GS ! n, 1..8). reverse = white on black (GS B)."""
+    w, h = w or scale, h or scale
+    n = ((w - 1) << 4) | (h - 1)
+    rev_on, rev_off = ("\x1dB\x01", "\x1dB\x00") if reverse else ("", "")
+    return f"\x1ba\x01\x1bE\x01{rev_on}\x1d!{chr(n)}{text}\x1d!\x00{rev_off}\x1bE\x00\x1ba\x00"
+
+
+def escpos_item(qty_size: str, name: str) -> str:
+    """Pizza line: '1x 50 CM' at 2× (width+height) followed by the name at double height – one line, 42 columns."""
+    return f"\x1bE\x01\x1d!\x11{qty_size}\x1d!\x01  {name}{ESC_RESET}"
 
 
 def strip_escpos(text: str) -> str:
     """Plain-text version of a ticket (app preview / logs): removes ESC/POS control sequences, keeps the words."""
-    text = re.sub(r"\x1d!.", "", text)
-    text = re.sub(r"\x1b[aE].", "", text)
+    text = re.sub(r"\x1d[!B].", "", text)
+    text = re.sub(r"\x1b[aEt].", "", text)
     return text
 
 
 def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     """OPERATIONAL kitchen / delivery ticket (80 mm). Real ESC/POS sizes: 3x for LIVRAISON/RETRAIT, #, times;
     2x for labels, payment and pizza sizes. Not a fiscal receipt (see build_receipt)."""
-    W = 32
+    W = 42  # Epson TM-T70 80 mm, font A
     c = lambda t: t.center(W)  # noqa: E731
-    big = lambda t: escpos_big(t, 3)  # noqa: E731
-    mid = lambda t: escpos_big(t, 2)  # noqa: E731
+    huge = lambda t, rev=False: escpos_big(t, 4, reverse=rev)  # noqa: E731  (4x – 10 chars max)
+    big = lambda t: escpos_big(t, 3)  # noqa: E731  (3x – 14 chars max)
+    mid = lambda t: escpos_big(t, 2)  # noqa: E731  (2x – 21 chars max)
+    tall = lambda t: escpos_big(t, 1, w=1, h=2)  # noqa: E731  (double height, 42 chars)
+    delivery = o["type"] == "delivery"
     lines: List[str] = [c(settings.restaurant_name.upper())]
     if reprint:
         lines += [c("*** REIMPRESSION ***")]
-    lines += ["=" * W]
-    # ---- 1. WHAT / WHICH / WHEN – legible from the kitchen ticket holder ------------------------------------
-    lines += [big("LIVRAISON" if o["type"] == "delivery" else "RETRAIT"), big(f"#{o['order_number']}"), "-" * W]
+    # ---- 1. LIVRAISON / RETRAIT – biggest text; delivery = white-on-black band, pickup = starred frame -----
+    if delivery:
+        lines += ["#" * W, huge("LIVRAISON", True), "#" * W]
+    else:
+        lines += ["*" * W, huge("RETRAIT"), "*" * W]
+    lines += [mid(f"#{o['order_number']}")]
     requested = o.get("requested_time") if o.get("requested_time") not in (None, "", "asap") else None
     confirmed = fmt_time(o["estimated_ready_at"]) if o.get("estimated_ready_at") else None
     ready_dt = o.get("estimated_ready_at") or o.get("scheduled_for")
     if ready_dt and ready_dt.tzinfo is None:
         ready_dt = ready_dt.replace(tzinfo=timezone.utc)
     scheduled = bool(ready_dt) and ready_dt.astimezone(TZ).date() != datetime.now(TZ).date()
+    # ---- 2. WHEN – very large time -------------------------------------------------------------------------
+    kind_word = "LIVRAISON" if delivery else "RETRAIT"
+    lines += ["-" * W]
     if scheduled:
         # Future-day order: the DATE is the first thing the kitchen must see – never confused with today's tickets
-        lines += ["#" * W, mid("COMMANDE PROGRAMMEE"), mid("PAS POUR AUJOURD'HUI"), mid("DATE"), mid(fmt_date(ready_dt).upper()),
-                  mid("HEURE"), big(confirmed or requested or "--:--"), "#" * W]
+        lines += [mid("COMMANDE PROGRAMMEE"), mid("PAS POUR AUJOURD'HUI"), mid(fmt_date(ready_dt).upper()),
+                  mid(kind_word), huge(confirmed or requested or "--:--")]
     elif requested:
-        lines += [mid("HEURE DEMANDEE"), big(requested)]
+        lines += [mid(f"{kind_word} {requested}")]
+        if confirmed and confirmed != requested:
+            lines += [mid(f"CONFIRMEE {confirmed}")]
+        lines += [huge(confirmed or requested)]
     else:
         lines += [mid("DES QUE POSSIBLE")]
-    if confirmed and not scheduled:
-        lines += [mid(f"CONFIRMEE {confirmed}")]
+        if confirmed:
+            lines += [mid("CONFIRMEE"), huge(confirmed)]
     lines += ["=" * W]
     # ---- 2. SOURCE --------------------------------------------------------------------------------------------
     src = f"TELEPHONE - POSTE {o.get('station') or 1}" if o.get("source") == "telephone" else {"web": "WEB", "ios": "APP IPHONE", "android": "APP ANDROID"}.get(o.get("source", "web"), o.get("source", "web").upper())
     lines += [c(src), "=" * W]
     if o.get("driver"):
-        lines += ["*" * W, mid(o["driver"].upper())] + ([c(f"- {o['driver_name'].upper()} -")] if o.get("driver_name") else []) + ["*" * W]
+        lines += [tall(f"{o['driver'].upper()}{(' - ' + o['driver_name'].upper()) if o.get('driver_name') else ''}")]
     if o.get("age_required"):
         lines += ["!" * W, c(f"ALCOOL - CONTROLE AGE {o['age_required']}+"), c("VERIFIER LA PIECE D'IDENTITE"), "!" * W]
     # ---- 3. PAYMENT – immediately visible --------------------------------------------------------------------
     method = o.get("collection_method") or ("terminal" if o.get("payment_method") == "terminal" else "cash")
     amount = "CHF %.2f" % o.get("amount_due", o["total"])
-    lines += ["#" * W]
+    lines += ["-" * W]
     if o.get("payment_collected") or method == "none":
-        lines += [mid("DEJA PAYE")]
+        lines += [tall("DEJA PAYE")]
     else:
-        lines += [mid("A ENCAISSER"), big(amount), mid("TERMINAL" if method == "terminal" else "ESPECES")]
-    lines += ["#" * W]
-    # ---- 4. ITEMS – size in its own big line, options/supplements indented under the pizza --------------------
+        lines += [tall(f"A ENCAISSER  {amount}"), tall("TERMINAL" if method == "terminal" else "ESPECES")]
+    # ---- 4. ITEMS – "1x 50 CM  NOM" on one line (size 2x, name double height); supplements indented below ------
     def size_txt(it):
         return it["size"]["label"].upper().replace("CM", "").strip() + " CM" if it.get("size") else ""
-    def sub(prefix, txt):
-        lines.append(f"   {prefix} {txt}")
+    def item_line(it, name):
+        head = f"{it['quantity']}x {size_txt(it)}".strip()
+        return escpos_item(head, name) if it.get("size") else tall(f"{it['quantity']}x {name}")
     lines += ["-" * W]
     for it in o["items"]:
-        qty = f"{it['quantity']}x "
         if it.get("half"):
-            lines.append(f"{qty}PIZZA MOITIE / MOITIE")
-            if size_txt(it):
-                lines.append(mid(size_txt(it)))
+            lines.append(item_line(it, "MOITIE / MOITIE"))
             lines.append(f"   1/2 {it['name']['fr'].upper()}")
             for r in it.get("removed_ingredients", []):
                 lines.append(f"       - SANS {r['fr'].upper()}")
@@ -1764,16 +1778,14 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
             if it["half"].get("note"):
                 lines.append(f"       NOTE: {it['half']['note'].upper()}")
         else:
-            lines.append(f"{qty}{it['name']['fr'].upper()}")
-            if size_txt(it):
-                lines.append(mid(size_txt(it)))
+            lines.append(item_line(it, it["name"]["fr"].upper()))
             for op in it.get("options", []):
-                sub("*", op["name"]["fr"].upper())
+                lines.append(f"   * {op['name']['fr'].upper()}")
             for r in it.get("removed_ingredients", []):
-                sub("-", f"SANS {r['fr'].upper()}")
+                lines.append(f"   - SANS {r['fr'].upper()}")
         for e in it.get("extras", []):
             q = f"{e['quantity']}x " if e["quantity"] > 1 else ""
-            sub("+", f"{q}{e['name']['fr'].upper()}")
+            lines.append(f"   + {q}{e['name']['fr'].upper()}")
         if not it.get("half") and it.get("note"):
             lines.append(f"   NOTE: {it['note'].upper()}")
         lines.append("")
@@ -1792,9 +1804,7 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     # Operational timestamps
     stamps = [("Recue", o.get("created_at")), ("Acceptee", o.get("accepted_at")), ("Prete", o.get("ready_at")), ("Partie", o.get("out_for_delivery_at")), ("Livree", o.get("delivered_at"))]
     lines += ["-" * W] + [f"{k + ':':<10}{fmt_time(v)}" for k, v in stamps if v]
-    if o["type"] == "delivery":
-        lines += ["", c("[QR LIVREUR]"), c(f"/driver?o={o['_id']}")]
-    lines += ["", c("Ticket operationnel"), c("- pas un recu fiscal -"), ""]
+    lines += ["", c("Ticket operationnel - pas un recu fiscal"), ""]
     return "\n".join(lines)
 
 
