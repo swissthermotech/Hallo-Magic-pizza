@@ -1575,8 +1575,11 @@ async def accept_order(order_id: str, body: AcceptIn, _: dict = Depends(STAFF)):
     elif body.minutes is not None:
         minutes = body.minutes
         base = ts
-        if sched and sched > ts:
-            base = sched  # scheduled: relative to the requested slot
+        requested_dt = sched
+        if not requested_dt and doc.get("requested_time") not in (None, "", "asap"):
+            requested_dt = parse_local_time(doc["requested_time"])  # same-day scheduled order (e.g. 13:45)
+        if requested_dt and requested_dt > ts:
+            base = requested_dt  # scheduled: "+30 min" is relative to the requested slot, never to the acceptance time
         else:
             st = hours_mod.ordering_status(await get_settings(), datetime.now(TZ))
             if st.get("asap_from") and not st["pickup_open"]:
@@ -1688,9 +1691,13 @@ def escpos_big(text: str, scale: int = 3, w: Optional[int] = None, h: Optional[i
     return f"\x1ba\x01\x1bE\x01{rev_on}\x1d!{chr(n)}{text}\x1d!\x00{rev_off}\x1bE\x00\x1ba\x00"
 
 
-def escpos_item(qty_size: str, name: str) -> str:
-    """Pizza line: '1x 50 CM' at 2× (width+height) followed by the name at double height – one line, 42 columns."""
-    return f"\x1bE\x01\x1d!\x11{qty_size}\x1d!\x01  {name}{ESC_RESET}"
+def escpos_item(qty_size: str, name: str) -> List[str]:
+    """Pizza line, whole line BOLD at 2× (21 columns on 80 mm): '1x 50 CM FORESTIÈRE' on ONE line when it fits,
+    otherwise '1x 50 CM' then the name on the next 2× line (the printer wraps names longer than 21 columns)."""
+    full = f"{qty_size} {name}".strip()
+    if len(full) <= 21:
+        return [f"\x1bE\x01\x1d!\x11{full}{ESC_RESET}"]
+    return [f"\x1bE\x01\x1d!\x11{qty_size}{ESC_RESET}", f"\x1bE\x01\x1d!\x11 {name}{ESC_RESET}"]
 
 
 def strip_escpos(text: str) -> str:
@@ -1725,22 +1732,27 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     if ready_dt and ready_dt.tzinfo is None:
         ready_dt = ready_dt.replace(tzinfo=timezone.utc)
     scheduled = bool(ready_dt) and ready_dt.astimezone(TZ).date() != datetime.now(TZ).date()
-    # ---- 2. WHEN – very large time -------------------------------------------------------------------------
+    # ---- 2. WHEN – the very large (4x) time is ALWAYS the effective ready/delivery time (never accepted_at) ----
     kind_word = "LIVRAISON" if delivery else "RETRAIT"
     lines += ["-" * W]
     if scheduled:
         # Future-day order: the DATE is the first thing the kitchen must see – never confused with today's tickets
-        lines += [mid("COMMANDE PROGRAMMEE"), mid("PAS POUR AUJOURD'HUI"), mid(fmt_date(ready_dt).upper()),
-                  mid(kind_word), huge(confirmed or requested or "--:--")]
+        lines += [mid("COMMANDE PROGRAMMEE"), mid("PAS POUR AUJOURD'HUI"), mid(fmt_date(ready_dt).upper())]
+        if requested and confirmed and confirmed != requested:
+            lines += [mid(f"DEMANDÉE {requested}"), mid(f"CONFIRMÉE {confirmed}")]
+        else:
+            lines += [mid(f"{kind_word} À")]
+        lines += [huge(confirmed or requested or "--:--")]
     elif requested:
-        lines += [mid(f"{kind_word} {requested}")]
         if confirmed and confirmed != requested:
-            lines += [mid(f"CONFIRMEE {confirmed}")]
-        lines += [huge(confirmed or requested)]
+            # Staff changed the requested time: show both, the large one is the confirmed operational time
+            lines += [mid(f"DEMANDÉE {requested}"), mid(f"CONFIRMÉE {confirmed}"), huge(confirmed)]
+        else:
+            lines += [mid(f"{kind_word} À"), huge(requested)]
     else:
-        lines += [mid("DES QUE POSSIBLE")]
+        lines += [mid("DÈS QUE POSSIBLE")]
         if confirmed:
-            lines += [mid("CONFIRMEE"), huge(confirmed)]
+            lines += [huge(confirmed)]
     lines += ["=" * W]
     # ---- 2. SOURCE --------------------------------------------------------------------------------------------
     src = f"TELEPHONE - POSTE {o.get('station') or 1}" if o.get("source") == "telephone" else {"web": "WEB", "ios": "APP IPHONE", "android": "APP ANDROID"}.get(o.get("source", "web"), o.get("source", "web").upper())
@@ -1757,16 +1769,15 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
         lines += [tall("DEJA PAYE")]
     else:
         lines += [tall(f"A ENCAISSER  {amount}"), tall("TERMINAL" if method == "terminal" else "ESPECES")]
-    # ---- 4. ITEMS – "1x 50 CM  NOM" on one line (size 2x, name double height); supplements indented below ------
+    # ---- 4. ITEMS – "1x 50 CM  NOM" whole line bold 2x (one line when it fits); supplements smaller, indented -----
     def size_txt(it):
         return it["size"]["label"].upper().replace("CM", "").strip() + " CM" if it.get("size") else ""
     def item_line(it, name):
-        head = f"{it['quantity']}x {size_txt(it)}".strip()
-        return escpos_item(head, name) if it.get("size") else tall(f"{it['quantity']}x {name}")
+        return escpos_item(f"{it['quantity']}x {size_txt(it)}".strip(), name)
     lines += ["-" * W]
     for it in o["items"]:
         if it.get("half"):
-            lines.append(item_line(it, "MOITIE / MOITIE"))
+            lines += item_line(it, "MOITIE / MOITIE")
             lines.append(f"   1/2 {it['name']['fr'].upper()}")
             for r in it.get("removed_ingredients", []):
                 lines.append(f"       - SANS {r['fr'].upper()}")
@@ -1778,7 +1789,7 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
             if it["half"].get("note"):
                 lines.append(f"       NOTE: {it['half']['note'].upper()}")
         else:
-            lines.append(item_line(it, it["name"]["fr"].upper()))
+            lines += item_line(it, it["name"]["fr"].upper())
             for op in it.get("options", []):
                 lines.append(f"   * {op['name']['fr'].upper()}")
             for r in it.get("removed_ingredients", []):
