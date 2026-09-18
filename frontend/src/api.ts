@@ -1,6 +1,6 @@
 import { Platform } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Menu, Order, Product, Extra, Settings, OrderType, CartItem, Customer, Address, User, SavedAddress } from "./types";
+import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress } from "./types";
 
 const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
 
@@ -207,6 +207,16 @@ export function useDeleteProduct() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["menu"] }),
   });
 }
+
+export function useSaveCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id?: string; body: Omit<Category, "id"> }) =>
+      id ? api.put<Category>(`/categories/${id}`, body) : api.post<Category>("/categories", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["menu"] }),
+  });
+}
+export const exportMenu = () => api.get<object>("/admin/export");
 
 export function useSaveExtra() {
   const qc = useQueryClient();

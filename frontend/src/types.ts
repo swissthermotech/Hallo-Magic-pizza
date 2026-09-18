@@ -38,6 +38,7 @@ export interface Extra {
   key: string;
   name: I18nText;
   price: number;
+  price_by_size?: Record<string, number> | null; // 32 / 40 / 50 cm supplement prices
   available: boolean;
   max_quantity: number;
   vat_rate?: number | null;
@@ -70,6 +71,9 @@ export interface Product {
   wine?: WineInfo | null;
   sort: number;
   vat_rate?: number | null;
+  highlight?: "moment" | "custom" | null; // Pizza du moment / Créez votre pizza – listed first
+  available_from?: string | null;
+  available_until?: string | null;
 }
 
 export type AlcoholType = "fermented" | "spirits";
@@ -128,6 +132,11 @@ export interface Settings {
   delivery_fee: number;
   free_delivery_from?: number | null;
   delivery_zones: DeliveryZone[];
+  hero_images?: string[];
+  public_url?: string;
+  review_enabled?: boolean;
+  google_review_url?: string;
+  review_delay_minutes?: number;
 }
 
 export interface Menu {

@@ -20,11 +20,14 @@ export default function ExtrasScreen() {
   const save = useSaveExtra();
   const [edit, setEdit] = useState<Partial<Extra> | null>(null);
 
+  // Per-size supplement prices (32 / 40 / 50 cm) – empty field = use the default price
+  const SIZES = ["32", "40", "50"];
+  const pbs = (m?: Record<string, number> | null) => Object.fromEntries(Object.entries(m ?? {}).filter(([, v]) => v !== undefined && v !== null && !Number.isNaN(v)));
   const submit = async () => {
     if (!edit?.name?.fr || edit.price === undefined) return toast.show(t("required"), "error");
     const key = edit.key || edit.name.fr.toLowerCase().replace(/[^a-z0-9]+/g, "_");
     try {
-      await save.mutateAsync({ id: edit.id, body: { key, name: { fr: edit.name.fr, de: edit.name.de || edit.name.fr }, price: Number(edit.price) || 0, available: edit.available ?? true, max_quantity: edit.max_quantity ?? 1, vat_rate: edit.vat_rate ?? data?.settings.vat_rate_standard ?? 2.6 } });
+      await save.mutateAsync({ id: edit.id, body: { key, name: { fr: edit.name.fr, de: edit.name.de || edit.name.fr }, price: Number(edit.price) || 0, price_by_size: pbs(edit.price_by_size), available: edit.available ?? true, max_quantity: edit.max_quantity ?? 1, vat_rate: edit.vat_rate ?? data?.settings.vat_rate_standard ?? 2.6 } });
       toast.show(t("saved"), "success");
       setEdit(null);
     } catch (e: any) {
@@ -44,6 +47,14 @@ export default function ExtrasScreen() {
               <Field label={`${t("price")} (CHF)`} value={String(edit.price ?? "")} onChangeText={(v) => setEdit({ ...edit, price: parseFloat(v.replace(",", ".")) || 0 })} keyboardType="decimal-pad" style={{ flex: 1 }} testID="extra-price" />
               <Field label="Max" value={String(edit.max_quantity ?? 1)} onChangeText={(v) => setEdit({ ...edit, max_quantity: parseInt(v, 10) || 1 })} keyboardType="number-pad" style={{ flex: 1 }} testID="extra-max" />
             </View>
+            <Text style={styles.sub}>{t("pricePerSize")}</Text>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              {SIZES.map((k) => (
+                <Field key={k} label={`${k} cm`} value={edit.price_by_size?.[k] !== undefined ? String(edit.price_by_size[k]) : ""} placeholder={String(edit.price ?? "")}
+                  onChangeText={(v) => { const m = { ...(edit.price_by_size ?? {}) }; const n = parseFloat(v.replace(",", ".")); if (v.trim() === "" || Number.isNaN(n)) delete m[k]; else m[k] = n; setEdit({ ...edit, price_by_size: m }); }}
+                  keyboardType="decimal-pad" style={{ flex: 1 }} testID={`extra-price-${k}`} />
+              ))}
+            </View>
             <VatPicker label={t("vatRate")} value={edit.vat_rate ?? data?.settings.vat_rate_standard} onChange={(v) => setEdit({ ...edit, vat_rate: v })} testID="extra-vat" />
             <View style={{ flexDirection: "row", gap: 10 }}>
               <Button title={t("close")} variant="outline" onPress={() => setEdit(null)} style={{ flex: 1 }} testID="extra-cancel" />
@@ -55,9 +66,9 @@ export default function ExtrasScreen() {
           <Pressable key={e.id} testID={`extra-item-${e.key}`} onPress={() => setEdit(e)} style={[styles.row, !e.available && { opacity: 0.55 }]}>
             <View style={{ flex: 1 }}>
               <Text style={styles.name}>{e.name.fr} <Text style={styles.de}>· {e.name.de}</Text></Text>
-              <Text style={styles.sub}>{chf(e.price)} · max {e.max_quantity} · {t("vat")} {(e.vat_rate ?? data?.settings.vat_rate_standard ?? 0).toFixed(1)}%</Text>
+              <Text style={styles.sub}>{e.price_by_size && Object.keys(e.price_by_size).length ? SIZES.map((k) => `${k}: ${chf(e.price_by_size?.[k] ?? e.price)}`).join(" · ") : chf(e.price)} · max {e.max_quantity} · {t("vat")} {(e.vat_rate ?? data?.settings.vat_rate_standard ?? 0).toFixed(1)}%</Text>
             </View>
-            <Switch testID={`extra-toggle-${e.key}`} value={e.available} onValueChange={(v) => { save.mutateAsync({ id: e.id, body: { key: e.key, name: e.name, price: e.price, available: v, max_quantity: e.max_quantity, vat_rate: e.vat_rate ?? null } }).catch((err) => toast.show(err.message, "error")); }} trackColor={{ true: colors.success, false: colors.borderStrong }} thumbColor={colors.surfaceSecondary} />
+            <Switch testID={`extra-toggle-${e.key}`} value={e.available} onValueChange={(v) => { save.mutateAsync({ id: e.id, body: { key: e.key, name: e.name, price: e.price, price_by_size: e.price_by_size ?? {}, available: v, max_quantity: e.max_quantity, vat_rate: e.vat_rate ?? null } }).catch((err) => toast.show(err.message, "error")); }} trackColor={{ true: colors.success, false: colors.borderStrong }} thumbColor={colors.surfaceSecondary} />
           </Pressable>
         ))}
       </KeyboardAwareScrollView>

@@ -8,6 +8,8 @@ from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pymongo import ReturnDocument
 import os
+import asyncio
+import re
 import logging
 from pathlib import Path
 
@@ -16,6 +18,8 @@ from database import client, db
 import auth as auth_mod
 import photos as photos_mod
 import staff_auth as staff_mod
+import review_email as review_mod
+from fastapi.responses import RedirectResponse
 import hours as hours_mod
 from fastapi.security import HTTPAuthorizationCredentials
 
@@ -103,7 +107,8 @@ class Category(BaseDocument):
 class Extra(BaseDocument):
     key: str
     name: I18n
-    price: float
+    price: float                          # default / fallback price
+    price_by_size: Dict[str, float] = {}  # per pizza size key ("32" / "40" / "50") – empty = use `price`
     available: bool = True
     max_quantity: int = 1
     vat_rate: Optional[float] = None  # % – None -> settings standard rate
@@ -152,6 +157,9 @@ class Product(BaseDocument):
     wine: Optional[WineInfo] = None
     sort: int = 0
     vat_rate: Optional[float] = None  # % – None -> derived from settings (alcohol vs standard)
+    highlight: Optional[str] = None   # "moment" (Pizza du moment – listed first) | "custom" (Créez votre pizza – second) | None
+    available_from: Optional[str] = None   # "YYYY-MM-DD" – optional window (e.g. Pizza du moment); empty = no limit
+    available_until: Optional[str] = None
     deleted_at: Optional[datetime] = None
 
 
@@ -175,6 +183,9 @@ class ProductIn(BaseModel):
     wine: Optional[WineInfo] = None
     sort: int = 0
     vat_rate: Optional[float] = None
+    highlight: Optional[str] = None
+    available_from: Optional[str] = None
+    available_until: Optional[str] = None
 
 
 class ProductPatch(BaseModel):
@@ -197,12 +208,16 @@ class ProductPatch(BaseModel):
     images: Optional[List[str]] = None
     wine: Optional[WineInfo] = None
     sort: Optional[int] = None
+    highlight: Optional[str] = None
+    available_from: Optional[str] = None
+    available_until: Optional[str] = None
 
 
 class ExtraIn(BaseModel):
     key: str
     name: I18n
     price: float
+    price_by_size: Dict[str, float] = {}
     available: bool = True
     max_quantity: int = 1
     vat_rate: Optional[float] = None
@@ -240,7 +255,12 @@ class Settings(BaseModel):
     delivery_cutoff_minutes: int = 15          # last delivery order before window end (13:45 / 21:45)
     first_delivery: Dict[str, str] = {}        # {"lunch": "11:30", "evening": "17:00" | "closed"} – manager quick control
     meat_fish_origin: I18n = I18n()            # "Origine des viandes et poissons" – free text maintained by admin
-    printing_enabled_at: Optional[datetime] = None  # orders created before this moment can never auto-print
+    printing_enabled_at: Optional[datetime] = None
+    hero_images: List[str] = []              # homepage carousel (admin-managed, API urls)
+    public_url: str = ""                     # public site url (https://…) used in customer e-mails
+    review_enabled: bool = False             # Google review request e-mail after a completed order
+    google_review_url: str = ""              # entered by the restaurant in Administration
+    review_delay_minutes: int = 90           # sent this long after completion  # orders created before this moment can never auto-print
     temporarily_closed: bool = False
     closed_message: I18n = I18n()
     delivery_enabled: bool = True
@@ -525,6 +545,19 @@ async def seed():
     await db.products.update_many({"is_alcohol": True, "alcohol_type": None}, {"$set": {"alcohol_type": "fermented"}})
     await auth_mod.ensure_indexes()
     await staff_mod.seed_staff_pins()
+    cur = await db.settings.find_one({"_id": "main"})
+    if cur is not None and cur.get("opening_hours"):
+        # Backward-compatible migration: canonicalise hours typed by hand (e.g. 'tue': '17.00-22' was unparseable -> Tuesday closed)
+        fixed = {}
+        for d, v in cur["opening_hours"].items():
+            try:
+                fixed[d] = normalize_hours(v or "")
+            except HTTPException:
+                fixed[d] = DEFAULT_SETTINGS["opening_hours"].get(d, "")
+                logger.warning("opening_hours[%s]=%r invalid – reset to default %r", d, v, fixed[d])
+        if fixed != cur["opening_hours"]:
+            await db.settings.update_one({"_id": "main"}, {"$set": {"opening_hours": fixed}})
+            logger.info("opening_hours normalised: %s", fixed)
     if PRINTNODE_API_KEY and PRINTNODE_PRINTER_ID:
         cur = await db.settings.find_one({})
         if cur is not None and not cur.get("printing_enabled_at"):
@@ -541,6 +574,8 @@ async def seed():
         photos_mod.init_storage()
     except Exception as e:  # storage unavailable -> uploads will retry lazily
         logger.warning("Object storage init failed: %s", e)
+    # Google review e-mails: isolated background loop (never in the order/print request path)
+    asyncio.create_task(review_mod.review_loop(db, get_settings, now_utc))
     logger.info("Seed check complete")
 
 
@@ -567,9 +602,12 @@ async def get_menu(include_unavailable: bool = False):
     cats = [Category.from_mongo(c) async for c in db.categories.find({"active": True}).sort("sort", 1)]
     q: Dict[str, Any] = {"deleted_at": None}
     products = [Product.from_mongo(p) async for p in db.products.find(q).sort("sort", 1)]
+    today = datetime.now(TZ).date().isoformat()
     if not include_unavailable:
-        # Sold-out items are still returned but flagged, so clients can render "unavailable"
-        pass
+        # Sold-out items are still returned but flagged; products outside their date window are hidden
+        products = [p for p in products if (not p.available_from or p.available_from <= today) and (not p.available_until or p.available_until >= today)]
+    rank = {"moment": 0, "custom": 1}
+    products.sort(key=lambda p: (rank.get(p.highlight or "", 2), p.sort))
     extras = [Extra.from_mongo(e) async for e in db.extras.find({}).sort("price", 1)]
     settings = await get_settings()
     return {"categories": cats, "products": products, "extras": extras, "settings": settings}
@@ -708,10 +746,54 @@ async def get_settings():
     return Settings(**doc)
 
 
+def normalize_hours(value: str) -> str:
+    """Accept sloppy admin input ("17.00-22", "11h-14h, 17:00 - 22:00") -> canonical "HH:MM-HH:MM, HH:MM-HH:MM"; "" = closed."""
+    out = []
+    for part in [p for p in value.replace(";", ",").split(",") if p.strip()]:
+        m = re.match(r"^\s*(\d{1,2})(?:[:.hH](\d{0,2}))?\s*-\s*(\d{1,2})(?:[:.hH](\d{0,2}))?\s*$", part)
+        if not m:
+            raise HTTPException(400, f"Horaire invalide: '{part.strip()}' (format 11:00-14:00)")
+        h1, m1, h2, m2 = int(m.group(1)), int(m.group(2) or 0), int(m.group(3)), int(m.group(4) or 0)
+        if not (0 <= h1 <= 23 and 0 <= h2 <= 24 and 0 <= m1 < 60 and 0 <= m2 < 60) or (h1 * 60 + m1) >= (h2 * 60 + m2):
+            raise HTTPException(400, f"Horaire invalide: '{part.strip()}'")
+        out.append(f"{h1:02d}:{m1:02d}-{h2:02d}:{m2:02d}")
+    return ", ".join(out)
+
+
 @api.put("/settings", response_model=Settings)
 async def update_settings(body: Settings, _: dict = Depends(MANAGER)):
+    body.opening_hours = {d: normalize_hours(v or "") for d, v in body.opening_hours.items()}
+    if body.google_review_url and not body.google_review_url.startswith("https://"):
+        raise HTTPException(400, "Le lien Google doit commencer par https://")
     await db.settings.update_one({"_id": "main"}, {"$set": body.model_dump()}, upsert=True)
     return body
+
+
+@api.get("/review/{order_id}/go")
+async def review_redirect(order_id: str):
+    """Link used in the review e-mail: our own domain -> the Google review URL configured in Administration."""
+    s = await get_settings()
+    if not s.google_review_url.startswith("https://"):
+        raise HTTPException(404, "Lien d'avis non configuré")
+    try:
+        await db.orders.update_one({"_id": oid(order_id)}, {"$set": {"review_clicked_at": now_utc()}})
+    except Exception:
+        pass
+    return RedirectResponse(s.google_review_url, status_code=302)
+
+
+@api.get("/admin/export")
+async def export_menu(_: dict = Depends(MANAGER)):
+    """Backup of the whole restaurant configuration (categories, products, extras, settings) as JSON."""
+    def clean(d):
+        d = dict(d); d["id"] = str(d.pop("_id")); return d
+    return {
+        "exported_at": now_utc().isoformat(), "app": "hallo-magic-pizza",
+        "categories": [clean(c) async for c in db.categories.find({})],
+        "products": [clean(p) async for p in db.products.find({})],
+        "extras": [clean(e) async for e in db.extras.find({})],
+        "settings": (await get_settings()).model_dump(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -733,6 +815,14 @@ def make_notification(event: str, n: int, t: str = "", d: int = 0, r: str = "") 
         body=I18n(fr=tx["body_fr"].format(n=n, t=t, d=d, r=r).strip(), de=tx["body_de"].format(n=n, t=t, d=d, r=r).strip()),
         created_at=now_utc(),
     ).model_dump()
+
+
+def extra_price(edoc: dict, size_key: Optional[str]) -> float:
+    """Supplement price for a pizza size (32/40/50) – falls back to the flat price."""
+    pbs = edoc.get("price_by_size") or {}
+    if size_key and size_key in pbs and pbs[size_key] is not None:
+        return float(pbs[size_key])
+    return float(edoc["price"])
 
 
 def split_vat(gross: float, rate: float):
@@ -864,11 +954,12 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
             ex_rate = edoc.get("vat_rate")
             if ex_rate is None:
                 ex_rate = settings.vat_rate_standard
-            eg, en, ev = split_vat(edoc["price"] * eqty * qty, ex_rate)
+            ex_price = extra_price(edoc, size.key if size else None)
+            eg, en, ev = split_vat(ex_price * eqty * qty, ex_rate)
             vat_groups[ex_rate] = vat_groups.get(ex_rate, 0.0) + eg
-            ex_list.append(OrderExtra(extra_id=ex.extra_id, name=I18n(**edoc["name"]), unit_price=edoc["price"], quantity=eqty,
+            ex_list.append(OrderExtra(extra_id=ex.extra_id, name=I18n(**edoc["name"]), unit_price=ex_price, quantity=eqty,
                                       vat_rate=ex_rate, gross_amount=eg, net_amount=en, vat_amount=ev))
-            ex_sum += edoc["price"] * eqty
+            ex_sum += ex_price * eqty
         removed = [Ingredient(**i) for i in pdoc.get("ingredients", []) if i["id"] in set(it.removed_ingredient_ids)]
         # Size
         size: Optional[SizeOption] = None
@@ -1585,42 +1676,53 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     lines: List[str] = [c(settings.restaurant_name.upper()), "=" * W]
     if reprint:
         lines += [c("*** REIMPRESSION ***"), "=" * W]
+    # ---- 1. WHAT / WHICH / WHEN – readable at a glance ------------------------------------------------------
     lines += ["", big("LIVRAISON" if o["type"] == "delivery" else "RETRAIT"), "", big(f"#{o['order_number']}"), ""]
-    when = fmt_time(o.get("estimated_ready_at")) if o.get("estimated_ready_at") else (o.get("requested_time") if o.get("requested_time") not in (None, "asap") else "DES QUE POSSIBLE")
+    requested = o.get("requested_time") if o.get("requested_time") not in (None, "", "asap") else None
+    confirmed = fmt_time(o["estimated_ready_at"]) if o.get("estimated_ready_at") else None
     ready_dt = o.get("estimated_ready_at") or o.get("scheduled_for")
     if ready_dt and ready_dt.tzinfo is None:
         ready_dt = ready_dt.replace(tzinfo=timezone.utc)
     scheduled = bool(ready_dt) and ready_dt.astimezone(TZ).date() != datetime.now(TZ).date()
     if scheduled:
         # Future-day order: the DATE is the first thing the kitchen must see – never confused with today's tickets
-        day_txt = fmt_date(ready_dt).upper()
-        lines += ["#" * W, c("*** COMMANDE PROGRAMMEE ***"), c("PAS POUR AUJOURD'HUI"), "", big("DATE"), c(day_txt), "", big("HEURE " + when), "#" * W]
-    lines += [c(("LIVRAISON " if o["type"] == "delivery" else "PRET ") + when), "=" * W]
-    src = f"TELEPHONE - POSTE {o.get('station') or 1}" if o.get("source") == "telephone" else o.get("source", "web").upper()
-    lines.append(f"Source: {src}")
-    if o.get("requested_time") and o["requested_time"] != "asap":
-        lines.append(f"Souhaite: {(fmt_date(o['scheduled_for']) + ' ') if o.get('scheduled_for') else ''}{o['requested_time']}")
+        lines += ["#" * W, c("*** COMMANDE PROGRAMMEE ***"), c("PAS POUR AUJOURD'HUI"), "", big("DATE"), c(fmt_date(ready_dt).upper()), "",
+                  big("HEURE"), big(confirmed or requested or "--:--"), "#" * W]
+    elif requested:
+        lines += [big("HEURE DEMANDEE"), big(requested)]
+    else:
+        lines += [big("DES QUE POSSIBLE")]
+    if confirmed and not scheduled:
+        lines += [c(f"CONFIRMEE : {confirmed}")]
+    lines += ["=" * W]
+    # ---- 2. SOURCE --------------------------------------------------------------------------------------------
+    src = f"TELEPHONE - POSTE {o.get('station') or 1}" if o.get("source") == "telephone" else {"web": "WEB", "ios": "APP IPHONE", "android": "APP ANDROID"}.get(o.get("source", "web"), o.get("source", "web").upper())
+    lines += [c(src), "=" * W]
     if o.get("driver"):
-        lines += ["", "*" * W, big(o["driver"].upper())] + ([c(f"— {o['driver_name'].upper()} —")] if o.get("driver_name") else []) + ["*" * W]
+        lines += ["*" * W, big(o["driver"].upper())] + ([c(f"- {o['driver_name'].upper()} -")] if o.get("driver_name") else []) + ["*" * W]
     if o.get("age_required"):
-        lines += ["", "!" * W, c(f"ALCOOL - CONTROLE AGE {o['age_required']}+"), c("VERIFIER LA PIECE D'IDENTITE"), "!" * W]
-    # Payment block
+        lines += ["!" * W, c(f"ALCOOL - CONTROLE AGE {o['age_required']}+"), c("VERIFIER LA PIECE D'IDENTITE"), "!" * W]
+    # ---- 3. PAYMENT – immediately visible --------------------------------------------------------------------
     method = o.get("collection_method") or ("terminal" if o.get("payment_method") == "terminal" else "cash")
     amount = "CHF %.2f" % o.get("amount_due", o["total"])
     lines += ["", "#" * W]
     if o.get("payment_collected") or method == "none":
-        lines += [c("PAYE / RIEN A ENCAISSER")]
-    elif method == "terminal":
-        lines += [c(f"TERMINAL {amount}")]
+        lines += [big("DEJA PAYE")]
     else:
-        lines += [c(f"A ENCAISSER {amount}"), c("ESPECES")]
+        lines += [big("A ENCAISSER"), big(amount), c("TERMINAL" if method == "terminal" else "ESPECES")]
     lines += ["#" * W, ""]
-    # Products
+    # ---- 4. ITEMS – size in its own big line, options/supplements indented under the pizza --------------------
+    def size_txt(it):
+        return it["size"]["label"].upper().replace("CM", "").strip() + " CM" if it.get("size") else ""
+    def sub(prefix, txt):
+        lines.append(f"   {prefix} {txt}")
     lines += ["-" * W]
     for it in o["items"]:
-        size = f" {it['size']['label'].upper().replace('CM', ' CM')}" if it.get("size") else ""
+        qty = f"{it['quantity']}x "
         if it.get("half"):
-            lines.append(f"{it['quantity']}x PIZZA{size} - MOITIE / MOITIE")
+            lines.append(f"{qty}PIZZA MOITIE / MOITIE")
+            if size_txt(it):
+                lines.append(big(size_txt(it)))
             lines.append(f"   1/2 {it['name']['fr'].upper()}")
             for r in it.get("removed_ingredients", []):
                 lines.append(f"       - SANS {r['fr'].upper()}")
@@ -1631,20 +1733,18 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
                 lines.append(f"       - SANS {r['fr'].upper()}")
             if it["half"].get("note"):
                 lines.append(f"       NOTE: {it['half']['note'].upper()}")
-            for e in it.get("extras", []):
-                q = f"{e['quantity']}x " if e["quantity"] > 1 else ""
-                lines.append(f"   + {q}{e['name']['fr'].upper()}")
-            lines.append("")
-            continue
-        lines.append(f"{it['quantity']}x {it['name']['fr'].upper()}{size}")
-        for op in it.get("options", []):
-            lines.append(f"   * {op['name']['fr'].upper()}")
-        for r in it.get("removed_ingredients", []):
-            lines.append(f"   - SANS {r['fr'].upper()}")
+        else:
+            lines.append(f"{qty}{it['name']['fr'].upper()}")
+            if size_txt(it):
+                lines.append(big(size_txt(it)))
+            for op in it.get("options", []):
+                sub("*", op["name"]["fr"].upper())
+            for r in it.get("removed_ingredients", []):
+                sub("-", f"SANS {r['fr'].upper()}")
         for e in it.get("extras", []):
             q = f"{e['quantity']}x " if e["quantity"] > 1 else ""
-            lines.append(f"   + {q}{e['name']['fr'].upper()}")
-        if it.get("note"):
+            sub("+", f"{q}{e['name']['fr'].upper()}")
+        if not it.get("half") and it.get("note"):
             lines.append(f"   NOTE: {it['note'].upper()}")
         lines.append("")
     if o.get("general_note"):

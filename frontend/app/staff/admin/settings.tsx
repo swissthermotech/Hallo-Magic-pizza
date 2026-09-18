@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Switch, Text, View } from "react-native";
+import { ActivityIndicator, Platform, Share, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useMenu, useSaveSettings } from "@/src/api";
+import { exportMenu, useMenu, useSaveSettings } from "@/src/api";
+import { PhotoManager } from "@/src/components/photo-manager";
 import { Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast, VatPicker } from "@/src/components/ui";
 import type { Settings } from "@/src/types";
 
@@ -94,6 +95,35 @@ export default function SettingsScreen() {
         {DAY_KEYS.map((d) => (
           <Field key={d} label={d.toUpperCase()} value={s.opening_hours[d] ?? ""} onChangeText={(v) => setS({ ...s, opening_hours: { ...s.opening_hours, [d]: v } })} testID={`settings-hours-${d}`} />
         ))}
+
+        {/* Homepage carousel photos – add / replace / remove; "set as main" moves a photo to the first slot */}
+        <Text style={styles.section}>{t("heroImages")}</Text>
+        <PhotoManager main={s.hero_images?.[0] ?? null} extra={(s.hero_images ?? []).slice(1)} onChange={(main, extra) => setS({ ...s, hero_images: [...(main ? [main] : []), ...extra] })} />
+
+        {/* Google review request e-mail */}
+        <Text style={styles.section}>{t("reviewSection")}</Text>
+        <View style={styles.switchRow}>
+          <Text style={[styles.switchLabel, { flex: 1 }]}>{t("reviewEnabled")}</Text>
+          <Switch testID="settings-review-enabled" value={!!s.review_enabled} onValueChange={(v) => setS({ ...s, review_enabled: v })} trackColor={{ true: colors.success, false: colors.borderStrong }} thumbColor={colors.surfaceSecondary} />
+        </View>
+        <Field label={t("reviewUrl")} value={s.google_review_url ?? ""} onChangeText={(v) => setS({ ...s, google_review_url: v.trim() })} autoCapitalize="none" placeholder="https://g.page/r/…/review" testID="settings-review-url" />
+        <Field label={t("reviewDelay")} value={String(s.review_delay_minutes ?? 90)} onChangeText={(v) => setS({ ...s, review_delay_minutes: parseInt(v, 10) || 0 })} keyboardType="number-pad" testID="settings-review-delay" />
+        <Field label={t("publicUrl")} value={s.public_url ?? ""} onChangeText={(v) => setS({ ...s, public_url: v.trim() })} autoCapitalize="none" placeholder="https://www.hallomagicpizza.ch" testID="settings-public-url" />
+
+        {/* Backup */}
+        <Text style={styles.section}>{t("exportMenu")}</Text>
+        <Button title={t("exportMenu")} icon="download" variant="outline" testID="settings-export" onPress={async () => {
+          try {
+            const json = JSON.stringify(await exportMenu(), null, 2);
+            const name = `hallo-magic-menu-${new Date().toISOString().slice(0, 10)}.json`;
+            if (Platform.OS === "web") {
+              const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+              const a = document.createElement("a"); a.href = url; a.download = name; a.click(); URL.revokeObjectURL(url);
+            } else {
+              await Share.share({ message: json, title: name });
+            }
+          } catch (e: any) { toast.show(e.message, "error"); }
+        }} />
       </KeyboardAwareScrollView>
       <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
         <Button title={t("save")} size="lg" icon="check" loading={save.isPending} onPress={submit} testID="settings-save" />

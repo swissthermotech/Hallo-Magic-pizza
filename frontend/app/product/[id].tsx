@@ -74,7 +74,14 @@ export default function ProductScreen() {
 
   const selectedOptions = (product?.options || []).filter((o) => optKeys.includes(o.key) && !o.default && optionAllowed(o));
   const basePrice = size ? size.price : product?.price ?? 0;
+  // Supplement price depends on the pizza size (32 / 40 / 50 cm) when the admin entered per-size prices
+  const extraPrice = (e: { price: number; price_by_size?: Record<string, number> | null }) => (size && e.price_by_size && e.price_by_size[size.key] !== undefined ? e.price_by_size[size.key] : e.price);
   const optionsSum = selectedOptions.reduce((s, o) => s + optionPrice(o), 0);
+  useEffect(() => {
+    // Size changed -> re-price the already selected supplements with the price of the new size
+    setExtras((prev) => prev.map((x) => { const e = allowedExtras.find((ae) => ae.id === x.extra_id); return e ? { ...x, unit_price: extraPrice(e) } : x; }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sizeKey]);
   const extrasSum = extras.reduce((s, e) => s + e.unit_price * e.quantity, 0);
   const unit = basePrice + optionsSum;
   const total = (unit + extrasSum) * qty;
@@ -113,7 +120,7 @@ export default function ProductScreen() {
   const setExtraQty = (e: { id: string; key: string; name: { fr: string; de: string }; price: number }, q: number) => {
     setExtras((prev) => {
       const rest = prev.filter((x) => x.extra_id !== e.id);
-      return q <= 0 ? rest : [...rest, { extra_id: e.id, key: e.key, name: e.name, unit_price: e.price, quantity: q }];
+      return q <= 0 ? rest : [...rest, { extra_id: e.id, key: e.key, name: e.name, unit_price: extraPrice(e), quantity: q }];
     });
   };
 
@@ -258,7 +265,7 @@ export default function ProductScreen() {
                     <View key={e.id} style={[styles.extraRow, i < allowedExtras.length - 1 && styles.extraRowBorder]} testID={`extra-row-${e.key}`}>
                       <View style={{ flex: 1 }}>
                         <Text style={[styles.extraName, cur > 0 && { color: colors.brandSecondary }]}>{tx(e.name)}</Text>
-                        <Text style={styles.extraPrice}>+ {chf(e.price)}</Text>
+                        <Text style={styles.extraPrice}>+ {chf(extraPrice(e))}</Text>
                       </View>
                       {cur === 0 ? (
                         <Pressable testID={`extra-add-${e.key}`} onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); setExtraQty(e, 1); }} style={styles.extraAdd}>

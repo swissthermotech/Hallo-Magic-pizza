@@ -41,6 +41,7 @@ export default function AdminScreen() {
         testID="admin-title"
         right={
           <View style={{ flexDirection: "row", gap: 8 }}>
+            <Pressable testID="admin-go-categories" onPress={() => router.push("/staff/admin/categories")} style={styles.iconBtn}><Feather name="list" size={20} color={colors.onSurface} /></Pressable>
             <Pressable testID="admin-go-extras" onPress={() => router.push("/staff/admin/extras")} style={styles.iconBtn}><Feather name="plus-square" size={20} color={colors.onSurface} /></Pressable>
             <Pressable testID="admin-go-security" onPress={() => router.push("/staff/admin/security")} style={styles.iconBtn}><Feather name="key" size={20} color={colors.onSurface} /></Pressable>
             <Pressable testID="admin-go-settings" onPress={() => router.push("/staff/admin/settings")} style={styles.iconBtn}><Feather name="sliders" size={20} color={colors.onSurface} /></Pressable>

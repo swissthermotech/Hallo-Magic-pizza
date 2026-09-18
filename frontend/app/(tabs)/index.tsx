@@ -12,6 +12,7 @@ import { imgUri, useMenu } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { ProductCard } from "@/src/components/product-card";
 import { Button, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
+import { HeroCarousel } from "@/src/components/hero-carousel";
 import type { OrderType, Product } from "@/src/types";
 
 export function LanguageToggle({ inverse }: { inverse?: boolean }) {
@@ -148,7 +149,8 @@ export default function MenuScreen() {
                     <Text style={styles.closedText}>{t("closedNow")}</Text>
                   </View>
                 ) : null}
-                <View style={styles.hero} testID="home-hero">
+                {(data?.settings.hero_images?.length ?? 0) > 0 ? <HeroCarousel images={data!.settings.hero_images!} onPress={orderNow} /> : null}
+                <View style={[styles.hero, (data?.settings.hero_images?.length ?? 0) > 0 && styles.heroCompact]} testID="home-hero">
                   <View style={styles.heroText}>
                     <Text style={styles.heroKicker}>{t("heroKicker")}</Text>
                     <Text style={styles.heroTitle}>Hallo Magic Pizza</Text>
@@ -158,10 +160,10 @@ export default function MenuScreen() {
                       <Feather name="arrow-right" size={18} color={colors.onBrandPrimary} />
                     </Pressable>
                   </View>
-                  <Pressable testID="hero-photo" onPress={() => heroProduct && router.push({ pathname: "/product/[id]", params: { id: heroProduct.id } })} style={styles.heroPhotoWrap}>
+                  {(data?.settings.hero_images?.length ?? 0) > 0 ? null : <Pressable testID="hero-photo" onPress={() => heroProduct && router.push({ pathname: "/product/[id]", params: { id: heroProduct.id } })} style={styles.heroPhotoWrap}>
                     <View style={styles.heroPhotoRing} />
                     <Image source={{ uri: imgUri(heroProduct?.image_url) }} style={styles.heroPhoto} contentFit="cover" transition={400} />
-                  </Pressable>
+                  </Pressable>}
                 </View>
                 <Text style={styles.howTo}>{t("howToGet")}</Text>
                 <OrderTypeSelector />
@@ -217,6 +219,7 @@ const useStyles = makeStyles((colors) => ({
   chipTextOn: { color: colors.onBrandPrimary },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16, padding: 24 },
   errorText: { fontFamily: FONT_TEXT, color: colors.muted, fontSize: 16 },
+  heroCompact: { marginTop: 10, paddingVertical: 12 },
   hero: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 14, padding: 18, borderRadius: 28, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, shadowColor: colors.surfaceInverse, shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
   heroText: { flex: 1, gap: 8 },
   heroKicker: { fontFamily: FONT_TEXT, fontSize: 10.5, fontWeight: "800", letterSpacing: 2, color: colors.brandPrimary },

@@ -30,7 +30,8 @@ export default function ProductEditor() {
   const del = useDeleteProduct();
   const product = data?.products.find((p) => p.id === id);
 
-  const [f, setF] = useState({ nameFr: "", nameDe: "", descFr: "", descDe: "", price: "", image: "", category: "", allergFr: "", allergDe: "", originFr: "", originDe: "", ingredients: "", sizes: "" });
+  const [f, setF] = useState({ nameFr: "", nameDe: "", descFr: "", descDe: "", price: "", image: "", category: "", allergFr: "", allergDe: "", originFr: "", originDe: "", ingredients: "", sizes: "", sort: "0", availableFrom: "", availableUntil: "" });
+  const [highlight, setHighlight] = useState<"" | "moment" | "custom">("");
   const [available, setAvailable] = useState(true);
   const [customizable, setCustomizable] = useState(false);
   const [isAlcohol, setIsAlcohol] = useState(false);
@@ -50,7 +51,9 @@ export default function ProductEditor() {
         allergFr: product.allergens.fr, allergDe: product.allergens.de, originFr: product.origin?.fr ?? "", originDe: product.origin?.de ?? "",
         ingredients: product.ingredients.map((i) => `${i.fr} | ${i.de}`).join("\n"),
         sizes: product.sizes.map((s) => `${s.key} | ${s.label} | ${s.price}`).join("\n"),
+        sort: String(product.sort ?? 0), availableFrom: product.available_from ?? "", availableUntil: product.available_until ?? "",
       });
+      setHighlight((product.highlight as "" | "moment" | "custom") ?? "");
       setAvailable(product.available);
       setCustomizable(product.customizable);
       setIsAlcohol(product.is_alcohol);
@@ -101,6 +104,10 @@ export default function ProductEditor() {
       is_alcohol: isAlcohol,
       alcohol_type: isAlcohol ? alcoholType : null,
       vat_rate: vatRate ?? (isAlcohol ? data!.settings.vat_rate_alcohol : data!.settings.vat_rate_standard),
+      sort: parseInt(f.sort, 10) || 0,
+      highlight: highlight || null,
+      available_from: f.availableFrom.trim() || null,
+      available_until: f.availableUntil.trim() || null,
     };
     try {
       await save.mutateAsync({ id: isNew ? undefined : id, body });
@@ -147,6 +154,18 @@ export default function ProductEditor() {
 
         <Text style={styles.section}>{t("price")}</Text>
         <Field label={`${t("price")} (CHF)`} value={f.price} onChangeText={set("price")} keyboardType="decimal-pad" testID="editor-price" />
+        <Field label={t("sortOrder")} value={f.sort} onChangeText={set("sort")} keyboardType="number-pad" testID="editor-sort" />
+        {/* Pizza du moment / Créez votre pizza: listed first in their category; optional visibility window */}
+        <Text style={styles.label}>{t("highlight")}</Text>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {([["", "highlightNone"], ["moment", "highlightMoment"], ["custom", "highlightCustom"]] as const).map(([v, k]) => (
+            <Chip key={k} label={t(k)} selected={highlight === v} onPress={() => setHighlight(v)} testID={`editor-highlight-${v || "none"}`} />
+          ))}
+        </View>
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          <Field label={t("availableFrom")} value={f.availableFrom} onChangeText={set("availableFrom")} placeholder="2026-10-01" autoCapitalize="none" style={{ flex: 1 }} testID="editor-available-from" />
+          <Field label={t("availableUntil")} value={f.availableUntil} onChangeText={set("availableUntil")} placeholder="2026-11-30" autoCapitalize="none" style={{ flex: 1 }} testID="editor-available-until" />
+        </View>
         <Field label={t("sizesList")} value={f.sizes} onChangeText={set("sizes")} multiline placeholder={"32 | 32cm | 18\n40 | 40cm | 31\n50 | 50cm | 40"} testID="editor-sizes" />
 
         <Text style={styles.section}>{t("ingredients")}</Text>
@@ -210,6 +229,7 @@ const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
   center: { alignItems: "center", justifyContent: "center" },
   section: { fontFamily: FONT_DISPLAY, fontSize: 19, color: colors.onSurface, marginTop: 6 },
+  label: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   link: { fontFamily: FONT_TEXT, color: colors.brandPrimary, fontWeight: "700" },
   switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: colors.surfaceSecondary, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, height: 52 },
