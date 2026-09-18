@@ -1733,7 +1733,7 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
         ready_dt = ready_dt.replace(tzinfo=timezone.utc)
     scheduled = bool(ready_dt) and ready_dt.astimezone(TZ).date() != datetime.now(TZ).date()
     # ---- 2. WHEN – the very large (4x) time is ALWAYS the effective ready/delivery time (never accepted_at) ----
-    kind_word = "LIVRAISON" if delivery else "RETRAIT"
+    when_label = "LIVRAISON DEMANDÉE" if delivery else "RETRAIT À"  # customer-requested time (delivery: 18 cols at 2x)
     lines += ["-" * W]
     if scheduled:
         # Future-day order: the DATE is the first thing the kitchen must see – never confused with today's tickets
@@ -1741,14 +1741,14 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
         if requested and confirmed and confirmed != requested:
             lines += [mid(f"DEMANDÉE {requested}"), mid(f"CONFIRMÉE {confirmed}")]
         else:
-            lines += [mid(f"{kind_word} À")]
+            lines += [mid(when_label)]
         lines += [huge(confirmed or requested or "--:--")]
     elif requested:
         if confirmed and confirmed != requested:
             # Staff changed the requested time: show both, the large one is the confirmed operational time
             lines += [mid(f"DEMANDÉE {requested}"), mid(f"CONFIRMÉE {confirmed}"), huge(confirmed)]
         else:
-            lines += [mid(f"{kind_word} À"), huge(requested)]
+            lines += [mid(when_label), huge(requested)]
     else:
         lines += [mid("DÈS QUE POSSIBLE")]
         if confirmed:
