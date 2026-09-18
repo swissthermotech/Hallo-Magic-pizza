@@ -1083,10 +1083,12 @@ async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.op
 
 
 @api.post("/phone-orders", response_model=Order)
-async def create_phone_order(body: PhoneOrderIn, _: dict = Depends(PHONE)):
+async def create_phone_order(body: PhoneOrderIn, staff: dict = Depends(PHONE)):
     """Staff-entered phone order: same catalog, prices, VAT snapshot, ticket and receipt as any other order.
-    Created as PENDING like every other order: it appears in the Manager queue and is NOT printed here.
-    The ONLY initial ticket is produced when the Manager taps "Accepter et confirmer" (POST /orders/{id}/accept)."""
+    The time was agreed with the caller on the phone, so the order is ACCEPTED immediately with that time
+    (ASAP -> now + N min, default 30; "in N min" -> that time; exact HH:MM -> confirmed as is) and goes straight
+    to EN COURS. Acceptance goes through the SAME accept_order path as every other order -> exactly ONE kitchen
+    ticket, same duplicate-print protection. The Manager can still refuse/cancel it afterwards from the card."""
     if body.station not in (1, 2):
         raise HTTPException(400, "station must be 1 or 2")
     if body.client_request_id:
@@ -1099,7 +1101,7 @@ async def create_phone_order(body: PhoneOrderIn, _: dict = Depends(PHONE)):
     body.source = "telephone"
     body.age_confirmed = True  # staff informs the caller; the 16+/18+ ID check happens at handover (ticket + dashboard warning)
     if (not body.requested_time or body.requested_time == "asap") and body.minutes is not None and not body.requested_date:
-        # "in N minutes" agreed on the phone -> stored as the requested time so the Manager can confirm it in one tap
+        # "in N minutes" agreed on the phone -> stored as the requested time (printed as LIVRAISON DEMANDÉE / RETRAIT À)
         body.requested_time = fmt_time(now_utc() + timedelta(minutes=body.minutes))
     order = await compute_order(body, customer, enforce_minimum=False, allow_half=True, enforce_hours=False)  # staff overrides: minimum, hours, half/half
     doc = order.to_mongo()
@@ -1108,7 +1110,9 @@ async def create_phone_order(body: PhoneOrderIn, _: dict = Depends(PHONE)):
     res = await db.orders.insert_one(doc)
     if customer and body.save_address and body.type == "delivery" and body.address:
         await auth_mod.save_address_for_user(customer, body.address.model_dump())
-    return Order.from_mongo(await load_order(str(res.inserted_id)))
+    # Immediate acceptance = the agreed time becomes the confirmed time and the ticket is printed (once) right now
+    agreed = AcceptIn(time=body.requested_time) if body.requested_time not in (None, "", "asap") else AcceptIn(minutes=30)
+    return await accept_order(str(res.inserted_id), agreed, staff)
 
 
 class AssignIn(BaseModel):

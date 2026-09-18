@@ -159,3 +159,8 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - DB still holds ~340 dev orders with customer "TEST*" (hidden from live lists) + other dev orders in Historique – ask user before wiping order history for go-live.
 - Production checklist: EMAIL_DRY_RUN=1 in backend/.env (set 0 to send review emails), settings.google_review_url + public_url empty, review_enabled False, phone '026 000 00 00' placeholder, default PINs (1234/2345/3456/1111…) must be changed in Admin → Sécurité.
 - Regression fix: nav row (Cuisine / Téléphone / Clients / Clôture / Administration) was inside the header on ≥900 px and got clipped (Administration hidden on 1024 px laptops). Now always a full-width WRAPPING row; Administration button dark-highlighted. Verified all 5 entries fully visible at 1024/768/390 and /staff/admin opens (products, categories, extras, settings, security untouched).
+
+## Iteration 21 – phone orders print immediately (user decision)
+- POST /api/phone-orders now inserts the order then calls accept_order() in-process with the agreed time (exact HH:MM → time; ASAP → minutes from Poste chips 15/20/30/45/60, default 30). Order goes straight to EN COURS, exactly ONE kitchen ticket via the same do_print idempotency; header TELEPHONE - POSTE 1/2 unchanged; Manager can still cancel from Détails. client_request_id double tap still returns the same order (no 2nd print).
+- Poste panel: minute chips in ASAP mode; success sheet shows confirmed time + print status. Verified simulated (key temporarily removed, then restored): 1 print job per order, correct ticket header. Test orders deleted.
+- Real phone orders #1464/#1465 (created before the change) are still PENDING in NOUVELLES – Manager must accept them once.

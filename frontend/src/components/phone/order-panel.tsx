@@ -20,6 +20,8 @@ interface Props {
   onTimeMode: (m: "asap" | "exact") => void;
   time: string;
   onTime: (t: string) => void;
+  minutes: number;
+  onMinutes: (m: number) => void;
   payment: PaymentMethod;
   onPayment: (p: PaymentMethod) => void;
   onConfirm: () => void;
@@ -77,7 +79,12 @@ export function OrderPanel(p: Props) {
           <View style={styles.wrap}>
             {quickSlots().map((s) => <Chip key={s} label={s} selected={p.time === s} onPress={() => p.onTime(s)} testID={`phone-slot-${s.replace(":", "")}`} />)}
           </View>
-        ) : null}
+        ) : (
+          /* Delay agreed with the caller: becomes the confirmed time and the ticket is printed right away */
+          <View style={styles.wrap}>
+            {[15, 20, 30, 45, 60].map((m) => <Chip key={m} label={`${m} min`} selected={p.minutes === m} onPress={() => p.onMinutes(m)} testID={`phone-minutes-${m}`} />)}
+          </View>
+        )}
       </View>
 
       {/* Payment */}
@@ -129,7 +136,7 @@ export function OrderPanel(p: Props) {
         <Text style={[styles.kicker, { color: colors.onSurfaceInverse }]}>{t("summary")} · {t("phoneStation")} {p.station}</Text>
         <Text style={styles.recapLine} testID="phone-recap-customer">{p.customer ? `${p.customer.first_name} ${p.customer.last_name} · ${p.customer.phone}` : t("selectCustomerFirst")}</Text>
         {delivery ? <Text style={styles.recapLine}>{p.address.street} {p.address.number}, {p.address.npa} {p.address.city}{p.address.instructions ? ` · ${p.address.instructions}` : ""}</Text> : null}
-        <Text style={styles.recapLine}>{delivery ? t("delivery") : t("pickup")} · {p.timeMode === "asap" ? t("asap") : p.time || "--:--"} · {payments.find((x) => x.key === p.payment)?.label}</Text>
+        <Text style={styles.recapLine}>{delivery ? t("delivery") : t("pickup")} · {p.timeMode === "asap" ? `${t("asap")} · ${p.minutes} min` : p.time || "--:--"} · {payments.find((x) => x.key === p.payment)?.label}</Text>
         {cart.requiredAge ? <Text style={[styles.recapLine, { color: colors.warning, fontWeight: "800" }]}>⚠ {t("ageCheckRequired")}: {cart.requiredAge}+</Text> : null}
         {belowMinimum ? <Text style={[styles.recapLine, { color: colors.warning, fontWeight: "800" }]} testID="phone-below-minimum">⚠ {t("belowMinimum")} ({t("minOrder")}{zone ? ` ${zone.city}` : ""}: {chf(minimum)})</Text> : null}
         <View style={styles.divider} />

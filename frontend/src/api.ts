@@ -285,6 +285,7 @@ export interface PhoneOrderPayload extends PlaceOrderPayload {
   payment_method: string;
   customer_id?: string | null;
   client_request_id?: string;
+  minutes?: number; // ASAP phone order: delay agreed with the caller (confirmed time = now + minutes)
 }
 export function usePlacePhoneOrder() {
   const qc = useQueryClient();
@@ -313,6 +314,7 @@ export function usePlacePhoneOrder() {
         address: p.address,
         requested_time: p.requested_time,
         requested_date: p.requested_date ?? null,
+        minutes: p.minutes ?? null,
         general_note: p.general_note,
         age_confirmed: true,
         save_address: !!p.save_address,

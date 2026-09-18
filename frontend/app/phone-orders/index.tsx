@@ -11,7 +11,7 @@ import { useMenu, usePlacePhoneOrder } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { useStaff } from "@/src/staff-auth";
 import { storage } from "@/src/utils/storage";
-import { chf } from "@/src/format";
+import { chf, fmtTime } from "@/src/format";
 import { Button, FONT_DISPLAY, FONT_TEXT, useToast } from "@/src/components/ui";
 import { CustomerPanel, emptyAddress, type OrderAddress } from "@/src/components/phone/customer-panel";
 import { MenuPanel } from "@/src/components/phone/menu-panel";
@@ -59,6 +59,7 @@ export default function PhoneOrdersScreen() {
   const [saveAddress, setSaveAddress] = useState(true);
   const [timeMode, setTimeMode] = useState<"asap" | "exact">("asap");
   const [time, setTime] = useState("");
+  const [minutes, setMinutes] = useState(30);
   const [payment, setPayment] = useState<PaymentMethod>("cash");
   const [pane, setPane] = useState<"entry" | "order">("entry");
   const [done, setDone] = useState<Order | null>(null);
@@ -71,6 +72,7 @@ export default function PhoneOrdersScreen() {
     setSavedAddrId(null);
     setTimeMode("asap");
     setTime("");
+    setMinutes(30);
     setPayment("cash");
     setDone(null);
     setPane("entry");
@@ -91,6 +93,7 @@ export default function PhoneOrdersScreen() {
         customer: { first_name: customer.first_name, last_name: customer.last_name, phone: customer.phone, email: customer.email || undefined },
         address: delivery ? { street: address.street.trim(), number: address.number.trim(), npa: address.npa.trim(), city: address.city.trim(), instructions: address.instructions.trim() || undefined } : undefined,
         requested_time: timeMode === "asap" ? "asap" : time.trim(),
+        minutes: timeMode === "asap" ? minutes : undefined,
         general_note: cart.generalNote.trim() || undefined,
         age_confirmed: true,
         save_address: delivery && !savedAddrId && saveAddress,
@@ -116,7 +119,7 @@ export default function PhoneOrdersScreen() {
       <MenuPanel />
     </View>
   );
-  const order = <OrderPanel settings={data?.settings} customer={customer} address={address} timeMode={timeMode} onTimeMode={setTimeMode} time={time} onTime={setTime} payment={payment} onPayment={setPayment} onConfirm={confirm} busy={place.isPending} station={station ?? 1} />;
+  const order = <OrderPanel settings={data?.settings} customer={customer} address={address} timeMode={timeMode} onTimeMode={setTimeMode} time={time} onTime={setTime} minutes={minutes} onMinutes={setMinutes} payment={payment} onPayment={setPayment} onConfirm={confirm} busy={place.isPending} station={station ?? 1} />;
 
   return (
     <View style={styles.screen}>
@@ -176,7 +179,8 @@ export default function PhoneOrdersScreen() {
             <Text style={styles.sheetTitle}>{t("phoneOrderCreated")}</Text>
             <Text style={styles.orderNum} testID="phone-success-number">#{done?.order_number}</Text>
             <Text style={styles.hint}>{t("phoneStation")} {done?.station} · {done?.type === "pickup" ? t("pickup") : t("delivery")} · {chf(done?.total ?? 0)}</Text>
-            <Text style={styles.hint}>{t("phoneOrderCreatedHint")}</Text>
+            <Text style={[styles.hint, { fontWeight: "800" }]} testID="phone-success-time">{t("confirmedTime")} · {done?.estimated_ready_at ? fmtTime(done.estimated_ready_at) : "--:--"}</Text>
+            <Text style={styles.hint} testID="phone-success-print">{done?.print_status === "sent" ? t("ticketSent") : done?.print_status === "failed" ? t("ticketFailed") : done?.print_status === "simulated" ? t("ticketSimulated") : t("phoneOrderCreatedHint")}</Text>
             <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
               <Button title={t("ticketPreview")} variant="outline" icon="file-text" onPress={() => { const id = done!.id; reset(); router.push({ pathname: "/staff/ticket/[id]", params: { id } }); }} style={{ flex: 1 }} testID="phone-success-ticket" />
               <Button title={t("newPhoneOrder")} icon="plus" onPress={reset} style={{ flex: 1 }} testID="phone-success-new" />
