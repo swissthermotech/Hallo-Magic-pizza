@@ -136,3 +136,6 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Checkout "Erreur": `compute_order` referenced `size` before assignment (introduced with per-size supplement prices) → HTTP 500 for every web order. Fixed (size key resolved before the extras loop). E2E verified (create → list → accept w/ pre-flag → ticket) with 0 real prints.
 - ASAP before opening: `hours.ordering_status` returns `asap_pickup / asap_delivery / asap_from`; backend accepts "asap" when an opening exists later today; checkout keeps "Dès que possible · 11:00" enabled with a hint; Manager quick minutes count from opening time when accepted before opening.
 - Supplement MAX is per line item (`min(qty, max_quantity)` per pizza) – unchanged. Per-size prices verified in stored order + ticket.
+
+## Iteration 17 – ticket layout final
+- build_ticket now emits real ESC/POS sizes: `escpos_big(text, 3)` (3x bold centered) for LIVRAISON/RETRAIT, order #, requested/confirmed times, amount; `escpos_big(text, 2)` for labels (DES QUE POSSIBLE, HEURE DEMANDEE, CONFIRMEE, DEJA PAYE / A ENCAISSER / ESPECES|TERMINAL, driver, pizza sizes). No blank lines at the top. `strip_escpos()` for app previews / accept response. QR unchanged (delivery only). Print trigger/idempotency untouched. Verified with synthetic dicts only – 0 print jobs.

@@ -1541,7 +1541,7 @@ async def do_print(doc: dict, force: bool) -> dict:
     inc = {"print_attempts": 1, **({"reprint_count": 1} if is_reprint else {})}
     new = await db.orders.find_one_and_update({"_id": doc["_id"]}, {"$set": upd, "$unset": {"print_lock": ""}, "$inc": inc}, return_document=ReturnDocument.AFTER)
     return {"ok": ok, "printed": ok, "printed_at": new["printed_at"], "print_attempts": new["print_attempts"],
-            "print_status": status, "last_print_error": upd["last_print_error"], "printnode_job_id": upd["printnode_job_id"], "text": text}
+            "print_status": status, "last_print_error": upd["last_print_error"], "printnode_job_id": upd["printnode_job_id"], "text": strip_escpos(text)}
 
 
 async def push_status(doc: dict, status: str, notif: Optional[dict], extra_set: Optional[dict] = None) -> Order:
@@ -1679,16 +1679,35 @@ async def set_status(order_id: str, body: StatusIn, _: dict = Depends(STAFF)):
 # ---------------------------------------------------------------------------
 # 80mm ticket
 # ---------------------------------------------------------------------------
+ESC_RESET = "\x1d!\x00\x1bE\x00\x1ba\x00"  # normal size, bold off, left align
+
+
+def escpos_big(text: str, scale: int = 3) -> str:
+    """One centered BOLD line printed at `scale`x width/height (Epson GS ! n). Falls back to normal text in previews."""
+    n = ((scale - 1) << 4) | (scale - 1)
+    return f"\x1ba\x01\x1bE\x01\x1d!{chr(n)}{text}{ESC_RESET}"
+
+
+def strip_escpos(text: str) -> str:
+    """Plain-text version of a ticket (app preview / logs): removes ESC/POS control sequences, keeps the words."""
+    text = re.sub(r"\x1d!.", "", text)
+    text = re.sub(r"\x1b[aE].", "", text)
+    return text
+
+
 def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
-    """OPERATIONAL kitchen / delivery ticket (80 mm, 32 cols). Not a fiscal receipt (see build_receipt)."""
+    """OPERATIONAL kitchen / delivery ticket (80 mm). Real ESC/POS sizes: 3x for LIVRAISON/RETRAIT, #, times;
+    2x for labels, payment and pizza sizes. Not a fiscal receipt (see build_receipt)."""
     W = 32
     c = lambda t: t.center(W)  # noqa: E731
-    big = lambda t: c(" ".join(t))  # noqa: E731  (spaced letters read as "large" in plain text)
-    lines: List[str] = [c(settings.restaurant_name.upper()), "=" * W]
+    big = lambda t: escpos_big(t, 3)  # noqa: E731
+    mid = lambda t: escpos_big(t, 2)  # noqa: E731
+    lines: List[str] = [c(settings.restaurant_name.upper())]
     if reprint:
-        lines += [c("*** REIMPRESSION ***"), "=" * W]
-    # ---- 1. WHAT / WHICH / WHEN – readable at a glance ------------------------------------------------------
-    lines += ["", big("LIVRAISON" if o["type"] == "delivery" else "RETRAIT"), "", big(f"#{o['order_number']}"), ""]
+        lines += [c("*** REIMPRESSION ***")]
+    lines += ["=" * W]
+    # ---- 1. WHAT / WHICH / WHEN – legible from the kitchen ticket holder ------------------------------------
+    lines += [big("LIVRAISON" if o["type"] == "delivery" else "RETRAIT"), big(f"#{o['order_number']}"), "-" * W]
     requested = o.get("requested_time") if o.get("requested_time") not in (None, "", "asap") else None
     confirmed = fmt_time(o["estimated_ready_at"]) if o.get("estimated_ready_at") else None
     ready_dt = o.get("estimated_ready_at") or o.get("scheduled_for")
@@ -1697,31 +1716,31 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     scheduled = bool(ready_dt) and ready_dt.astimezone(TZ).date() != datetime.now(TZ).date()
     if scheduled:
         # Future-day order: the DATE is the first thing the kitchen must see – never confused with today's tickets
-        lines += ["#" * W, c("*** COMMANDE PROGRAMMEE ***"), c("PAS POUR AUJOURD'HUI"), "", big("DATE"), c(fmt_date(ready_dt).upper()), "",
-                  big("HEURE"), big(confirmed or requested or "--:--"), "#" * W]
+        lines += ["#" * W, mid("COMMANDE PROGRAMMEE"), mid("PAS POUR AUJOURD'HUI"), mid("DATE"), mid(fmt_date(ready_dt).upper()),
+                  mid("HEURE"), big(confirmed or requested or "--:--"), "#" * W]
     elif requested:
-        lines += [big("HEURE DEMANDEE"), big(requested)]
+        lines += [mid("HEURE DEMANDEE"), big(requested)]
     else:
-        lines += [big("DES QUE POSSIBLE")]
+        lines += [mid("DES QUE POSSIBLE")]
     if confirmed and not scheduled:
-        lines += [c(f"CONFIRMEE : {confirmed}")]
+        lines += [mid(f"CONFIRMEE {confirmed}")]
     lines += ["=" * W]
     # ---- 2. SOURCE --------------------------------------------------------------------------------------------
     src = f"TELEPHONE - POSTE {o.get('station') or 1}" if o.get("source") == "telephone" else {"web": "WEB", "ios": "APP IPHONE", "android": "APP ANDROID"}.get(o.get("source", "web"), o.get("source", "web").upper())
     lines += [c(src), "=" * W]
     if o.get("driver"):
-        lines += ["*" * W, big(o["driver"].upper())] + ([c(f"- {o['driver_name'].upper()} -")] if o.get("driver_name") else []) + ["*" * W]
+        lines += ["*" * W, mid(o["driver"].upper())] + ([c(f"- {o['driver_name'].upper()} -")] if o.get("driver_name") else []) + ["*" * W]
     if o.get("age_required"):
         lines += ["!" * W, c(f"ALCOOL - CONTROLE AGE {o['age_required']}+"), c("VERIFIER LA PIECE D'IDENTITE"), "!" * W]
     # ---- 3. PAYMENT – immediately visible --------------------------------------------------------------------
     method = o.get("collection_method") or ("terminal" if o.get("payment_method") == "terminal" else "cash")
     amount = "CHF %.2f" % o.get("amount_due", o["total"])
-    lines += ["", "#" * W]
+    lines += ["#" * W]
     if o.get("payment_collected") or method == "none":
-        lines += [big("DEJA PAYE")]
+        lines += [mid("DEJA PAYE")]
     else:
-        lines += [big("A ENCAISSER"), big(amount), c("TERMINAL" if method == "terminal" else "ESPECES")]
-    lines += ["#" * W, ""]
+        lines += [mid("A ENCAISSER"), big(amount), mid("TERMINAL" if method == "terminal" else "ESPECES")]
+    lines += ["#" * W]
     # ---- 4. ITEMS – size in its own big line, options/supplements indented under the pizza --------------------
     def size_txt(it):
         return it["size"]["label"].upper().replace("CM", "").strip() + " CM" if it.get("size") else ""
@@ -1733,7 +1752,7 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
         if it.get("half"):
             lines.append(f"{qty}PIZZA MOITIE / MOITIE")
             if size_txt(it):
-                lines.append(big(size_txt(it)))
+                lines.append(mid(size_txt(it)))
             lines.append(f"   1/2 {it['name']['fr'].upper()}")
             for r in it.get("removed_ingredients", []):
                 lines.append(f"       - SANS {r['fr'].upper()}")
@@ -1747,7 +1766,7 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
         else:
             lines.append(f"{qty}{it['name']['fr'].upper()}")
             if size_txt(it):
-                lines.append(big(size_txt(it)))
+                lines.append(mid(size_txt(it)))
             for op in it.get("options", []):
                 sub("*", op["name"]["fr"].upper())
             for r in it.get("removed_ingredients", []):
@@ -1783,7 +1802,7 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
 async def get_ticket(order_id: str, _: dict = Depends(TICKET)):
     doc = await load_order(order_id)
     settings = await get_settings()
-    return {"order_id": order_id, "order_number": doc["order_number"], "text": build_ticket(doc, settings),
+    return {"order_id": order_id, "order_number": doc["order_number"], "text": strip_escpos(build_ticket(doc, settings)),
             "printed": doc.get("printed", False), "printed_at": doc.get("printed_at"), "print_attempts": doc.get("print_attempts", 0),
             "print_status": doc.get("print_status"), "printer_configured": bool(PRINTNODE_API_KEY and PRINTNODE_PRINTER_ID),
             "last_print_error": doc.get("last_print_error"), "printnode_job_id": doc.get("printnode_job_id"),
