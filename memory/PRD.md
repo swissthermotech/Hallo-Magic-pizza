@@ -170,3 +170,13 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Left untouched (reported): #1387 (cancelled) & #1388 (completed) on 2026-09-17 assigned to dev driver identity "Test" (Livreur 3); pending phone orders #1464/#1465.
 - Clôture: livraisons = delivered/completed only; commandes list = all assigned that day; money over delivered only – math verified 0 mismatches. Label now "N commandes · M livraisons · K en cours · C annulées".
 - Production URLs: <domain>/ customer · /staff/login (PIN → Manager|Cuisine) · /phone-orders (PIN Téléphone or Manager, Poste chosen on device) · /staff/login → /driver (Livreur PINs from Admin → Sécurité).
+
+## Iteration 23 – FINAL DEV PASS (DONE; PrintNode key restored; testing agent iter 13+14 pass; entrees.name.de fixed to Vorspeisen)
+- Sound: shared provider src/staff-sound.tsx mounted in app/staff/_layout.tsx (manager/kitchen): one player, module-level session unlock (no re-unlock when navigating sections), soundOn persisted (AsyncStorage), rings on genuinely new pending order + every 20 s while NOUVELLES non-empty, stops on accept/mute. New louder 2.6 s chime assets/sounds/new-order.wav. Verified in browser: plays at +3 s, +23 s, +43 s, none after accept.
+- Card quick accept: 15/20/30/45/60 MIN one tap (locks instantly via `busy`), "AUTRE / HEURE EXACTE · REFUSER" opens detail.
+- Checkout: payment choice ESPÈCES / CARTE (TERMINAL) for both types → payment_method cash|terminal (OrderIn.payment_method, default cash); email REQUIRED + validated (frontend + backend 400) for web/app orders only (phone orders unaffected).
+- Menu: categories Entrées(1) Salades(2) Pizzas(3) Créer votre pizza(hidden tab, merged inside Pizzas after Pizza du mois) Piadina & Pasta Desserts Boissons. Only one product may be highlight=moment (backend enforces). Admin hint under highlight chip.
+- Public: "Accès restaurant" + "Version test" removed from Plus tab; LegalFooter (Confidentialité/CGV/Mentions légales → /legal/[kind]) on home + Plus; texts from settings.legal_privacy/terms/imprint (Admin → Réglages → Textes légaux), placeholder when empty.
+- Supplements per line: verified in real cart (3× Margherita each with 2× Jambon) + backend compute – no change needed.
+- Verified in browser: mute stops the 20 s repeat, unmute resumes; CONFIRMER 19:30 accept keeps requested time; Poste 2 UI minute chips; admin legal fields. Driver quick-assign requires an OPEN shift (buttons show "service fermé" otherwise – existing behaviour).
+- DEVELOPMENT FINISHED. Remaining = restaurant content/config (see final report in chat).

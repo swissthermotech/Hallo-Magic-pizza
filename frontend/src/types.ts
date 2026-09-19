@@ -136,6 +136,9 @@ export interface Settings {
   public_url?: string;
   review_enabled?: boolean;
   google_review_url?: string;
+  legal_privacy?: I18nText;
+  legal_terms?: I18nText;
+  legal_imprint?: I18nText;
   review_delay_minutes?: number;
 }
 

@@ -182,6 +182,7 @@ export default function ProductEditor() {
             <Chip key={k} label={t(k)} selected={highlight === v} onPress={() => setHighlight(v)} testID={`editor-highlight-${v || "none"}`} />
           ))}
         </View>
+        {highlight === "moment" ? <Text style={styles.hint} testID="editor-month-hint">{t("pizzaOfMonthHint")}</Text> : null}
         <View style={{ flexDirection: "row", gap: 10 }}>
           <Field label={t("availableFrom")} value={f.availableFrom} onChangeText={set("availableFrom")} placeholder="2026-10-01" autoCapitalize="none" style={{ flex: 1 }} testID="editor-available-from" />
           <Field label={t("availableUntil")} value={f.availableUntil} onChangeText={set("availableUntil")} placeholder="2026-11-30" autoCapitalize="none" style={{ flex: 1 }} testID="editor-available-until" />

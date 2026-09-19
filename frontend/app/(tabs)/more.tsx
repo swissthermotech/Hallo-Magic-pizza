@@ -9,6 +9,7 @@ import { useMenu } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
 import { LanguageToggle } from "./index";
+import { LegalFooter } from "@/src/components/legal-footer";
 
 const DAYS: Record<string, { fr: string; de: string }> = {
   mon: { fr: "Lundi", de: "Montag" }, tue: { fr: "Mardi", de: "Dienstag" }, wed: { fr: "Mercredi", de: "Mittwoch" },
@@ -86,11 +87,7 @@ export default function MoreScreen() {
           </View>
         ) : null}
 
-        <Pressable testID="more-staff-access" onPress={() => router.push("/staff/login")} style={styles.staffLink}>
-          <Feather name="lock" size={13} color={colors.muted} />
-          <Text style={styles.footer}>{t("staffAccess")}</Text>
-        </Pressable>
-        <Text style={styles.footer}>Hallo Magic Pizza · {tx({ fr: "Version test", de: "Testversion" })} · CHF</Text>
+        <LegalFooter name={s?.restaurant_name} />
       </ScrollView>
     </View>
   );
@@ -132,5 +129,4 @@ const useStyles = makeStyles((colors) => ({
   day: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.muted },
   hours: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.onSurface, fontWeight: "600" },
   footer: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted, textAlign: "center" },
-  staffLink: { flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center", paddingVertical: 10, marginTop: 12 },
 }));

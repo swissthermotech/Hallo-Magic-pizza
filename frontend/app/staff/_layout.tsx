@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from "react-native";
 import { Redirect, Stack, useGlobalSearchParams, usePathname } from "expo-router";
 import { themes } from "@/src/theme";
 import { homeFor, useStaff } from "@/src/staff-auth";
+import { StaffSoundProvider } from "@/src/staff-sound";
 
 export default function StaffLayout() {
   const { ready, unlocked, role } = useStaff();
@@ -26,5 +27,10 @@ export default function StaffLayout() {
   if (unlocked && role === "phone" && !pathname.startsWith("/staff/ticket")) return <Redirect href="/phone-orders" />;
   if (unlocked && role !== "manager" && (pathname.startsWith("/staff/admin") || pathname.startsWith("/staff/closing"))) return <Redirect href="/staff" />;
 
-  return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themes.light.surface } }} />;
+  // New-order alert lives at layout level: it keeps ringing while the manager is in Cuisine / Clients / Admin…
+  return (
+    <StaffSoundProvider active={role === "manager" || role === "kitchen"}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: themes.light.surface } }} />
+    </StaffSoundProvider>
+  );
 }

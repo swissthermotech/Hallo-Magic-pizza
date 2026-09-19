@@ -135,6 +135,7 @@ export interface PlaceOrderPayload {
   age_confirmed: boolean;
   save_address?: boolean;
   language: string;
+  payment_method: "cash" | "terminal"; // how the customer will pay at handover (no online payment)
 }
 
 export function usePlaceOrder() {
@@ -161,6 +162,7 @@ export function usePlaceOrder() {
         age_confirmed: p.age_confirmed,
         save_address: !!p.save_address,
         language: p.language,
+        payment_method: p.payment_method,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
   });
@@ -280,7 +282,7 @@ export function useCustomerSearch(phone: string) {
 }
 
 // ---- Phone orders (staff iPads) ----
-export interface PhoneOrderPayload extends PlaceOrderPayload {
+export interface PhoneOrderPayload extends Omit<PlaceOrderPayload, "payment_method"> {
   station: number;
   payment_method: string;
   customer_id?: string | null;

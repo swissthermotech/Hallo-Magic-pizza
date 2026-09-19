@@ -110,6 +110,16 @@ export default function SettingsScreen() {
         <Field label={t("reviewDelay")} value={String(s.review_delay_minutes ?? 90)} onChangeText={(v) => setS({ ...s, review_delay_minutes: parseInt(v, 10) || 0 })} keyboardType="number-pad" testID="settings-review-delay" />
         <Field label={t("publicUrl")} value={s.public_url ?? ""} onChangeText={(v) => setS({ ...s, public_url: v.trim() })} autoCapitalize="none" placeholder="https://www.hallomagicpizza.ch" testID="settings-public-url" />
 
+        {/* Legal texts shown on the public site (Confidentialité / CGV / Mentions légales) */}
+        <Text style={styles.section}>{t("legalTexts")}</Text>
+        <Text style={styles.hint}>{t("legalHint")}</Text>
+        {(["legal_privacy", "legal_terms", "legal_imprint"] as const).map((k) => (
+          <View key={k} style={{ gap: 10 }}>
+            <Field label={`${t(k === "legal_privacy" ? "legalPrivacy" : k === "legal_terms" ? "legalTerms" : "legalImprint")} (FR)`} value={s[k]?.fr ?? ""} onChangeText={(v) => setS({ ...s, [k]: { fr: v, de: s[k]?.de ?? "" } })} multiline testID={`settings-${k}-fr`} />
+            <Field label={`${t(k === "legal_privacy" ? "legalPrivacy" : k === "legal_terms" ? "legalTerms" : "legalImprint")} (DE)`} value={s[k]?.de ?? ""} onChangeText={(v) => setS({ ...s, [k]: { fr: s[k]?.fr ?? "", de: v } })} multiline testID={`settings-${k}-de`} />
+          </View>
+        ))}
+
         {/* Backup */}
         <Text style={styles.section}>{t("exportMenu")}</Text>
         <Button title={t("exportMenu")} icon="download" variant="outline" testID="settings-export" onPress={async () => {
@@ -136,6 +146,7 @@ const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
   center: { alignItems: "center", justifyContent: "center" },
   section: { fontFamily: FONT_DISPLAY, fontSize: 19, color: colors.onSurface, marginTop: 6 },
+  hint: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },
   switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: colors.surfaceSecondary, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, height: 52 },
   switchLabel: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "600", color: colors.onSurface },
   cta: { position: "absolute", left: 0, right: 0, bottom: 0, paddingHorizontal: 16, paddingTop: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },

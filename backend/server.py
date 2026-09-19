@@ -260,6 +260,10 @@ class Settings(BaseModel):
     public_url: str = ""                     # public site url (https://…) used in customer e-mails
     review_enabled: bool = False             # Google review request e-mail after a completed order
     google_review_url: str = ""              # entered by the restaurant in Administration
+    # Public legal pages (Confidentialité / CGV / Mentions légales) – text entered by the restaurant, empty = placeholder
+    legal_privacy: I18n = I18n(fr="", de="")
+    legal_terms: I18n = I18n(fr="", de="")
+    legal_imprint: I18n = I18n(fr="", de="")
     review_delay_minutes: int = 90           # sent this long after completion  # orders created before this moment can never auto-print
     temporarily_closed: bool = False
     closed_message: I18n = I18n()
@@ -360,6 +364,7 @@ class OrderIn(BaseModel):
     age_confirmed: bool = False
     save_address: bool = False  # logged-in customers: store the delivery address in the profile
     language: str = "fr"
+    payment_method: str = "cash"  # how the customer will pay at handover: "cash" (ESPÈCES) | "terminal" (CARTE) – no online payment
 
 
 PAYMENT_METHODS = {
@@ -549,6 +554,12 @@ async def seed():
     if not await db.categories.find_one({"slug": "entrees"}):
         await db.categories.update_many({}, {"$inc": {"sort": 1}})
         await db.categories.insert_one(Category(slug="entrees", name=I18n(fr="Entrées", de="Vorspeisen"), sort=1).to_mongo())
+    if not await db.categories.find_one({"slug": "salades"}):
+        await db.categories.update_many({"sort": {"$gte": 2}}, {"$inc": {"sort": 1}})
+        await db.categories.insert_one(Category(slug="salades", name=I18n(fr="Salades", de="Salate"), sort=2).to_mongo())
+    # Final public labels (only if still the seed defaults – restaurant edits win)
+    await db.categories.update_one({"slug": "pizza", "name.fr": "Pizza"}, {"$set": {"name": {"fr": "Pizzas", "de": "Pizzas"}}})
+    await db.categories.update_one({"slug": "dessert", "name.fr": "Dessert"}, {"$set": {"name": {"fr": "Desserts", "de": "Desserts"}}})
     await auth_mod.ensure_indexes()
     await staff_mod.seed_staff_pins()
     cur = await db.settings.find_one({"_id": "main"})
@@ -667,12 +678,16 @@ async def get_product(product_id: str):
 
 @api.post("/products", response_model=Product)
 async def create_product(body: ProductIn, _: dict = Depends(MANAGER)):
+    if body.highlight == "moment":  # only ONE Pizza du mois at a time
+        await db.products.update_many({"highlight": "moment"}, {"$set": {"highlight": None}})
     res = await db.products.insert_one(Product(**body.model_dump()).to_mongo())
     return Product.from_mongo(await db.products.find_one({"_id": res.inserted_id}))
 
 
 @api.put("/products/{product_id}", response_model=Product)
 async def update_product(product_id: str, body: ProductIn, _: dict = Depends(MANAGER)):
+    if body.highlight == "moment":  # only ONE Pizza du mois at a time
+        await db.products.update_many({"highlight": "moment", "_id": {"$ne": oid(product_id)}}, {"$set": {"highlight": None}})
     doc = await db.products.find_one_and_update({"_id": oid(product_id)}, {"$set": body.model_dump()}, return_document=ReturnDocument.AFTER)
     if not doc:
         raise HTTPException(404, "Product not found")
@@ -1071,9 +1086,21 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
     )
 
 
+EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
+
+
 @api.post("/orders", response_model=Order)
 async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.optional_user)):
+    # Customer Web/App checkout: e-mail is mandatory (order follow-up + review request); phone orders (staff) are not affected
+    email = (body.customer.email or "").strip().lower()
+    if not EMAIL_RE.match(email):
+        raise HTTPException(400, "Adresse e-mail invalide / Ungültige E-Mail-Adresse")
+    body.customer.email = email
+    if body.payment_method not in ("cash", "terminal", "pay_at_pickup", "pay_at_delivery"):
+        raise HTTPException(400, "Invalid payment method")
     order = await compute_order(body, user)
+    if body.payment_method in ("cash", "terminal"):
+        order.payment_method = body.payment_method  # drives ticket "A ENCAISSER · ESPECES/TERMINAL", driver screen and Clôture buckets
     doc = order.to_mongo()
     doc.update(collection_fields(order.payment_method, order.total))
     res = await db.orders.insert_one(doc)

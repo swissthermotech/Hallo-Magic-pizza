@@ -112,3 +112,7 @@
 - PRINTNODE IS LIVE. Do NOT create orders via POST /api/phone-orders (prints immediately) unless the key is disabled. For any order creation test, main agent must disable the key first (currently LIVE – testing agent must NOT create/accept orders; READ-ONLY verification of Clôture only).
 - Cleanup done: 610 automated test orders, 229 TEST_ users, 84 closed "Test*" driver shifts deleted. 46 orders remain (manual test orders by the restaurant team).
 - Clôture livreurs: GET /api/reports/closing?date=YYYY-MM-DD (manager). Semantics: "livraisons" = orders with status delivered/completed assigned to that driver identity that day; "commandes" list = ALL orders assigned that day (incl. en cours / annulées). Money totals only over delivered/completed.
+
+## Iteration 23 notes for testing agent
+- Printing SIMULATED right now (key disabled). Test customers must use first_name "TEST_..." and email like test@example.com; delete them at the end (Mongo orders collection).
+- New: checkout requires email + payment choice (testIDs checkout-email, checkout-pay-cash, checkout-pay-terminal). Quick accept testIDs staff-quick-{15,20,30,45,60}-<id>, staff-quick-other-<id>. Sound banner testID staff-sound-enable, toggle staff-sound-toggle, alert new-order-alert. Legal: legal-footer, legal-link-{privacy,terms,imprint}, legal-body-*. Admin settings: settings-legal_privacy-fr etc.

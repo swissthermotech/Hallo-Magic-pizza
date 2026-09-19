@@ -44,6 +44,8 @@ export default function CheckoutScreen() {
   const [time, setTime] = useState<string>("");
   const [f, setF] = useState({ first_name: "", last_name: "", phone: "", email: "", street: "", number: "", npa: "", city: "", instructions: "" });
   const [ageOk, setAgeOk] = useState(false);
+  const [payment, setPayment] = useState<"cash" | "terminal">("cash");
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim());
   const { data: ordering } = useOrderingStatus();
   // Scheduled ordering: a day (today + up to 7 days, closed days skipped) and only valid slots for that day
   const days = useMemo(() => ordering?.days ?? [], [ordering]);
@@ -97,18 +99,19 @@ export default function CheckoutScreen() {
   const requestedTime = timeMode === "asap" ? "asap" : time;
 
   const valid =
-    f.first_name.trim() && f.phone.trim() && (timeMode === "asap" ? asapAvailable : !!time && slots.includes(time)) && (type === "pickup" || (f.street.trim() && f.npa.trim() && f.city.trim() && !zoneMissing)) && (!cart.hasAlcohol || ageOk) && !belowMin && cart.items.length > 0;
+    f.first_name.trim() && f.phone.trim() && emailOk && (timeMode === "asap" ? asapAvailable : !!time && slots.includes(time)) && (type === "pickup" || (f.street.trim() && f.npa.trim() && f.city.trim() && !zoneMissing)) && (!cart.hasAlcohol || ageOk) && !belowMin && cart.items.length > 0;
 
   const submit = async () => {
     if (!valid) {
-      toast.show(cart.hasAlcohol && !ageOk ? t("ageRequired") : t("required"), "error");
+      toast.show(cart.hasAlcohol && !ageOk ? t("ageRequired") : !emailOk && f.first_name.trim() && f.phone.trim() ? t("invalidEmail") : t("required"), "error");
       return;
     }
     try {
       const order = await place.mutateAsync({
         type,
         items: cart.items,
-        customer: { first_name: f.first_name.trim(), last_name: f.last_name.trim(), phone: f.phone.trim(), email: f.email.trim() || undefined },
+        customer: { first_name: f.first_name.trim(), last_name: f.last_name.trim(), phone: f.phone.trim(), email: f.email.trim().toLowerCase() },
+        payment_method: payment,
         address: type === "delivery" ? { street: f.street.trim(), number: f.number.trim(), npa: f.npa.trim(), city: f.city.trim(), instructions: f.instructions.trim() || undefined } : undefined,
         requested_time: requestedTime,
         requested_date: timeMode === "scheduled" && isFutureDay ? day.date : null,
@@ -203,7 +206,9 @@ export default function CheckoutScreen() {
             <Field label={t("lastName")} value={f.last_name} onChangeText={set("last_name")} style={{ flex: 1 }} testID="checkout-last-name" autoCapitalize="words" />
           </View>
           <Field label={`${t("phone")} *`} value={f.phone} onChangeText={set("phone")} keyboardType="phone-pad" placeholder="079 123 45 67" testID="checkout-phone" />
-          <Field label={t("email")} value={f.email} onChangeText={set("email")} keyboardType="email-address" autoCapitalize="none" testID="checkout-email" />
+          <Field label={`${t("email")} *`} value={f.email} onChangeText={set("email")} keyboardType="email-address" autoCapitalize="none" autoComplete="email" placeholder="nom@exemple.ch" testID="checkout-email" />
+          {f.email.trim() && !emailOk ? <Text style={[styles.hint, { color: colors.error }]} testID="checkout-email-error">{t("invalidEmail")}</Text> : null}
+          <Text style={styles.hint} testID="checkout-email-hint">{t("emailUsage")}</Text>
           {type === "delivery" && user && user.addresses.length > 0 ? (
             <View style={{ gap: 8 }}>
               <Text style={styles.hint}>{t("useSavedAddress")}</Text>
@@ -247,11 +252,22 @@ export default function CheckoutScreen() {
         ) : null}
 
         {/* Payment */}
-        <View style={styles.payBox}>
-          <Feather name="credit-card" size={18} color={colors.brandSecondary} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.payTitle} testID="payment-method-label">{type === "pickup" ? t("payAtPickup") : t("payAtDelivery")}</Text>
-            <Text style={styles.payHint}>{t("noOnlinePayment")}</Text>
+        <View style={{ gap: 10 }}>
+          <Text style={styles.sectionTitle}>{t("howToPay")}</Text>
+          <View style={styles.two}>
+            {(["cash", "terminal"] as const).map((m) => (
+              <Pressable key={m} testID={`checkout-pay-${m}`} onPress={() => setPayment(m)} style={[styles.payOpt, payment === m && styles.payOptOn]}>
+                <Feather name={m === "cash" ? "dollar-sign" : "credit-card"} size={20} color={payment === m ? colors.onBrandPrimary : colors.brandSecondary} />
+                <Text style={[styles.payOptText, payment === m && { color: colors.onBrandPrimary }]}>{m === "cash" ? t("payCash").toUpperCase() : t("payCard").toUpperCase()}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.payBox}>
+            <Feather name="info" size={18} color={colors.brandSecondary} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.payTitle} testID="payment-method-label">{type === "pickup" ? t("payAtPickup") : t("payAtDelivery")} · {payment === "cash" ? t("payCash") : t("payCard")}</Text>
+              <Text style={styles.payHint}>{t("noOnlinePayment")}</Text>
+            </View>
           </View>
         </View>
 
@@ -317,6 +333,9 @@ const useStyles = makeStyles((colors) => ({
   checkboxOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
   ageText: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.onSurface, flex: 1, fontWeight: "600" },
   payBox: { flexDirection: "row", gap: 12, alignItems: "center", backgroundColor: colors.successSoft, borderRadius: 12, padding: 14 },
+  payOpt: { flex: 1, minHeight: 56, borderRadius: 14, borderWidth: 2, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  payOptOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  payOptText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "900", color: colors.onSurface, letterSpacing: 0.5 },
   payTitle: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.brandSecondary },
   payHint: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
   summary: { backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 8 },

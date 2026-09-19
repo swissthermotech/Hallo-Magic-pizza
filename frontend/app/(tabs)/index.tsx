@@ -13,6 +13,7 @@ import { useCart } from "@/src/cart";
 import { ProductCard } from "@/src/components/product-card";
 import { Button, Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
 import { HeroCarousel } from "@/src/components/hero-carousel";
+import { LegalFooter } from "@/src/components/legal-footer";
 import type { OrderType, Product } from "@/src/types";
 
 export function LanguageToggle({ inverse }: { inverse?: boolean }) {
@@ -81,18 +82,28 @@ export default function MenuScreen() {
   // Responsive product grid: 1 column on phones, 2 on tablets, 3 on desktop (content capped at MAX_W)
   const cols = width >= 1100 ? 3 : width >= 680 ? 2 : 1;
 
+  // "Créer votre pizza" is not a main tab: its products are listed INSIDE Pizzas, right after the Pizza du mois
+  const customCat = data?.categories.find((c) => c.slug === CUSTOM_PIZZA_SLUG);
+  const mainCats = useMemo(() => (data?.categories ?? []).filter((c) => !c.filter && c.active !== false && c.slug !== CUSTOM_PIZZA_SLUG), [data]);
   const sections = useMemo(() => {
     if (!data) return [];
-    const cats = cat === "all" ? data.categories.filter((c) => !c.filter && c.active !== false) : data.categories.filter((c) => c.id === cat);
+    const cats = cat === "all" ? mainCats : mainCats.filter((c) => c.id === cat);
     return cats
       .map((c) => {
-        const products = c.filter ? data.products.filter((p) => p.options.some((o) => o.key === c.filter)) : data.products.filter((p) => p.category_id === c.id);
+        let products = c.filter ? data.products.filter((p) => p.options.some((o) => o.key === c.filter)) : data.products.filter((p) => p.category_id === c.id);
+        if (c.slug === PIZZA_SLUG && customCat) {
+          // Order inside Pizzas: 1) Pizza du mois  2) Créez votre pizza  3) regular pizzas
+          const custom = data.products.filter((p) => p.category_id === customCat.id);
+          const month = [...products, ...custom].filter((p) => p.highlight === "moment");
+          const rest = products.filter((p) => p.highlight !== "moment");
+          products = [...month, ...custom.filter((p) => p.highlight !== "moment"), ...rest];
+        }
         const rows: Product[][] = [];
         for (let i = 0; i < products.length; i += cols) rows.push(products.slice(i, i + cols));
         return { id: c.id, title: tx(c.name), filter: c.filter ?? null, count: products.length, data: rows };
       })
       .filter((s) => s.count > 0);
-  }, [data, cat, tx, cols]);
+  }, [data, cat, tx, cols, mainCats, customCat]);
 
   const selectCat = (id: string) => {
     Haptics.selectionAsync().catch(() => {});
@@ -123,7 +134,7 @@ export default function MenuScreen() {
         </View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[styles.chips, width >= MAX_W && { minWidth: "100%", justifyContent: "center" }]} style={styles.chipRow}>
           <CatChip label={t("all")} selected={cat === "all"} onPress={() => selectCat("all")} testID="category-chip-all" />
-          {data?.categories.filter((c) => !c.filter && c.active !== false).map((c) => (
+          {mainCats.map((c) => (
             <CatChip key={c.id} label={tx(c.name)} selected={cat === c.id} onPress={() => selectCat(c.id)} testID={`category-chip-${c.slug}`} />
           ))}
         </ScrollView>
@@ -143,6 +154,7 @@ export default function MenuScreen() {
           keyExtractor={(row) => row[0].id}
           stickySectionHeadersEnabled={false}
           ListEmptyComponent={<Empty icon="coffee" title={t("emptyCategory")} />}
+          ListFooterComponent={<LegalFooter name={data?.settings?.restaurant_name} />}
           contentContainerStyle={[{ paddingHorizontal: 16, paddingBottom: 24 }, styles.maxW]}
           ListHeaderComponent={
             cat === "all" ? (
@@ -209,6 +221,8 @@ function CatChip({ label, selected, onPress, testID }: { label: string; selected
 }
 
 const MAX_W = 1120;
+const PIZZA_SLUG = "pizza";
+const CUSTOM_PIZZA_SLUG = "creer-votre-pizza";
 const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
   maxW: { width: "100%", maxWidth: MAX_W, alignSelf: "center" },

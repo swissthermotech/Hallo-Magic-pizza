@@ -1,21 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@react-native-vector-icons/feather";
-import { useAudioPlayer } from "expo-audio";
 import Animated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useActiveOrders } from "@/src/api";
 import { useStaff } from "@/src/staff-auth";
+import { useStaffSound } from "@/src/staff-sound";
 import { FirstDeliveryControl } from "@/src/components/first-delivery";
 import { Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
 import { OrderCard, OrderDetail, isScheduledLater } from "@/src/components/staff-order";
-import type { Order } from "@/src/types";
 import type { StringKey } from "@/src/i18n";
 
-const ALERT = require("../../assets/sounds/alert.wav");
 type Filter = "new" | "scheduled" | "progress" | "done";
 type NavItem = { testID: string; href: string; icon: React.ComponentProps<typeof Feather>["name"]; label: StringKey; manager?: boolean };
 const NAV: NavItem[] = [
@@ -41,42 +39,8 @@ export default function StaffDashboard() {
   const orders = useMemo(() => data ?? [], [data]);
   const [filter, setFilter] = useState<Filter>("new");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [soundOn, setSoundOn] = useState(true);
-  const [soundUnlocked, setSoundUnlocked] = useState(Platform.OS !== "web");
-  const [alert, setAlert] = useState<Order | null>(null);
-  const player = useAudioPlayer(ALERT);
-  const known = useRef<Set<string> | null>(null);
-  const alertTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const ring = useCallback(() => {
-    // Browsers block audio until the page was tapped once ("Activer le son"); never let audio break the dashboard
-    try {
-      Promise.resolve(player.seekTo(0)).catch(() => {});
-      Promise.resolve(player.play()).catch(() => {});
-    } catch {}
-  }, [player]);
-  const unlockSound = () => {
-    ring();
-    setSoundUnlocked(true);
-    setSoundOn(true);
-  };
-
-  // New order detection -> visual + audio alert
-  useEffect(() => {
-    if (!data) return;
-    const pendingIds = data.filter((o) => o.status === "pending").map((o) => o.id);
-    if (known.current === null) {
-      known.current = new Set(pendingIds);
-      return;
-    }
-    const fresh = data.find((o) => o.status === "pending" && !o.legacy && !known.current!.has(o.id));
-    pendingIds.forEach((id) => known.current!.add(id));
-    if (fresh) {
-      setAlert(fresh);
-      if (soundOn && soundUnlocked) ring();
-      if (alertTimer.current) clearTimeout(alertTimer.current);
-      alertTimer.current = setTimeout(() => setAlert(null), 8000);
-    }
-  }, [data, soundOn, soundUnlocked, ring]);
+  // Sound + new-order detection are shared for the whole staff area (see src/staff-sound.tsx)
+  const { soundOn, unlocked: soundUnlocked, enable: unlockSound, toggle: toggleSound, fresh: alert, dismiss: dismissAlert } = useStaffSound();
 
   // Operational lists only contain live orders; pre-go-live test data (legacy) and finished orders live in Historique
   const live = useMemo(() => orders.filter((o) => !o.legacy), [orders]);
@@ -87,13 +51,6 @@ export default function StaffDashboard() {
     progress: live.filter((o) => !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)).length,
     done: orders.filter((o) => o.legacy || ["completed", "cancelled"].includes(o.status)).length,
   }), [orders, live]);
-
-  // Reminder: ring again every 20 s while a NEW (un-accepted) order is waiting in NOUVELLES; stops on accept / mute
-  useEffect(() => {
-    if (!soundOn || !soundUnlocked || counts.new === 0) return;
-    const iv = setInterval(ring, 20000);
-    return () => clearInterval(iv);
-  }, [soundOn, soundUnlocked, counts.new, ring]);
 
   const list = orders
     .filter((o) =>
@@ -117,7 +74,7 @@ export default function StaffDashboard() {
             <Text style={styles.subtitle} numberOfLines={1}>{label}</Text>
           </View>
           <View style={{ flex: 1 }} />
-          <Pressable testID="staff-sound-toggle" onPress={() => (soundUnlocked ? setSoundOn((v) => !v) : unlockSound())} style={[styles.iconBtn, soundOn && soundUnlocked && styles.iconBtnOn]}>
+          <Pressable testID="staff-sound-toggle" onPress={toggleSound} style={[styles.iconBtn, soundOn && soundUnlocked && styles.iconBtnOn]}>
             <Feather name={soundOn && soundUnlocked ? "volume-2" : "volume-x"} size={20} color={soundOn && soundUnlocked ? colors.onBrandPrimary : colors.onSurface} />
           </Pressable>
           <Pressable testID="staff-lock" onPress={() => { lock(); router.replace("/(tabs)/more"); }} style={styles.iconBtn}><Feather name="lock" size={18} color={colors.onSurface} /></Pressable>
@@ -140,7 +97,7 @@ export default function StaffDashboard() {
         <Animated.View entering={FadeInDown} exiting={FadeOutUp} style={styles.alert} testID="new-order-alert">
           <Feather name="bell" size={22} color={colors.onBrandPrimary} />
           <Text style={styles.alertText}>{t("orderReceived")} #{alert.order_number} · {alert.customer.first_name} · {alert.type === "pickup" ? t("pickup") : t("delivery")}{isScheduledLater(alert) ? ` · ${t("scheduled").toUpperCase()} ${alert.requested_date} ${alert.requested_time}` : ""}</Text>
-          <Pressable testID="new-order-alert-open" onPress={() => { setFilter(isScheduledLater(alert) ? "scheduled" : "new"); setAlert(null); }} style={styles.alertBtn}><Text style={styles.alertBtnText}>{t("newOrders").toUpperCase()}</Text></Pressable>
+          <Pressable testID="new-order-alert-open" onPress={() => { setFilter(isScheduledLater(alert) ? "scheduled" : "new"); dismissAlert(); }} style={styles.alertBtn}><Text style={styles.alertBtnText}>{t("newOrders").toUpperCase()}</Text></Pressable>
         </Animated.View>
       ) : null}
 

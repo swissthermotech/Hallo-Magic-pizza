@@ -35,6 +35,7 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
   const assign = useAssignDriver();
   const { data: slots } = useDriverSlots();
   const [changeDriver, setChangeDriver] = useState(false);
+  const [busy, setBusy] = useState(false); // locks the time buttons instantly on the first tap (no accidental double accept)
   const pending = o.status === "pending";
   const closed = o.status === "completed" || o.status === "cancelled";
   const delivery = o.type === "delivery";
@@ -44,8 +45,11 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
   const payLabel = o.payment_collected || collect === "none" ? t("alreadyPaid") : `${t("toCollect")} · ${collect === "terminal" ? t("payTerminal") : t("payCash")}`;
   // Quick accept = the SAME "Accepter et confirmer" action as the detail (single backend path, one ticket on success)
   const quickAccept = (body: { minutes?: number; time?: string }) => {
+    if (busy || action.isPending) return;
+    setBusy(true);
     Haptics.selectionAsync().catch(() => {});
     action.mutateAsync({ id: o.id, action: "accept", body })
+      .finally(() => setBusy(false))
       .then((res) => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
         const ps = res.print_status;
@@ -74,6 +78,7 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
     if (delivery && o.status === "delivering") next.push({ status: "delivered", label: t("deliveredBtn"), icon: "home" });
     if (["ready", "picked_up", "delivered", "delivering"].includes(o.status)) next.push({ status: "completed", label: t("completeBtn"), icon: "flag" });
   }
+  const locked = busy || action.isPending;
   const showDrivers = delivery && !pending && !closed && !o.legacy && !["delivering", "delivered"].includes(o.status);
   return (
     <View testID={`staff-order-card-${o.id}`} style={[styles.card, selected && styles.cardSelected, pending && styles.cardPending]}>
@@ -129,20 +134,20 @@ export function OrderCard({ order: o, selected, onPress }: { order: Order; selec
       {pending && !o.legacy ? (
         <View style={styles.quickRow} testID={`staff-quick-accept-${o.id}`}>
           {requested ? (
-            <Pressable testID={`staff-quick-confirm-${o.id}`} disabled={action.isPending} onPress={() => quickAccept({ time: requested })} style={[styles.quickBtn, styles.quickBtnConfirm, { flexBasis: "100%" }]}>
+            <Pressable testID={`staff-quick-confirm-${o.id}`} disabled={locked} onPress={() => quickAccept({ time: requested })} style={[styles.quickBtn, styles.quickBtnConfirm, { flexBasis: "100%" }, locked && { opacity: 0.5 }]}>
               <Feather name="check-circle" size={20} color={colors.onSuccess} />
               <Text style={styles.quickBtnText}>{t("confirm").toUpperCase()} {requested}</Text>
             </Pressable>
           ) : null}
-          {!scheduledLater ? [15, 20, 30].map((m) => (
-            <Pressable key={m} testID={`staff-quick-${m}-${o.id}`} disabled={action.isPending} onPress={() => quickAccept({ minutes: m })} style={[styles.quickBtn, action.isPending && { opacity: 0.5 }]}>
+          {!scheduledLater ? [15, 20, 30, 45, 60].map((m) => (
+            <Pressable key={m} testID={`staff-quick-${m}-${o.id}`} disabled={locked} onPress={() => quickAccept({ minutes: m })} style={[styles.quickBtn, styles.quickBtnMin, locked && { opacity: 0.5 }]}>
               <Text style={styles.quickBtnBig}>{requested ? "+" : ""}{m}</Text>
               <Text style={styles.quickBtnUnit}>MIN</Text>
             </Pressable>
           )) : null}
-          <Pressable testID={`staff-quick-other-${o.id}`} onPress={onPress} style={[styles.quickBtn, styles.quickBtnOther]}>
+          <Pressable testID={`staff-quick-other-${o.id}`} disabled={locked} onPress={onPress} style={[styles.quickBtn, styles.quickBtnOther, { flexBasis: "100%", minHeight: 48 }]}>
             <Feather name="clock" size={18} color={colors.onSurface} />
-            <Text style={[styles.quickBtnText, { color: colors.onSurface }]}>{t("customTime").toUpperCase()} / {t("reject")}</Text>
+            <Text style={[styles.quickBtnText, { color: colors.onSurface }]}>{t("otherTime").toUpperCase()} · {t("reject").toUpperCase()}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -501,6 +506,7 @@ const useStyles = makeStyles((colors) => ({
   quickRowFlat: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   quickBtn: { flexGrow: 1, flexBasis: "22%", minHeight: 60, borderRadius: 14, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6, paddingHorizontal: 10 },
   quickBtnConfirm: { backgroundColor: colors.success, minHeight: 60 },
+  quickBtnMin: { flexBasis: "17%", paddingHorizontal: 4 },
   quickBtnOther: { backgroundColor: colors.surfaceTertiary },
   stepBtn: { backgroundColor: colors.success, flexBasis: "45%" },
   stepBtnDone: { backgroundColor: colors.brandPrimary },
