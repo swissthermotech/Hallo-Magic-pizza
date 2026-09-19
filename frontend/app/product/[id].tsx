@@ -15,6 +15,9 @@ import { chf } from "@/src/format";
 import { Badge, Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, Stepper, useToast } from "@/src/components/ui";
 import type { CartExtra, Ingredient, ProductOption } from "@/src/types";
 
+// Subtle portion guide on the standard pizza sizes only (special fixed sizes such as Bambino 26 cm get none)
+const SIZE_GUIDE: Record<string, string> = { "32": "👤", "40": "👥", "50": "👥👥" };
+
 export default function ProductScreen() {
   const { id, line, option } = useLocalSearchParams<{ id: string; line?: string; option?: string }>();
   const styles = useStyles();
@@ -105,13 +108,13 @@ export default function ProductScreen() {
     });
   };
   const chooseOption = (o: ProductOption, list: ProductOption[]) => {
+    if (!optionAllowed(o)) return; // e.g. gluten-free only in 32 cm: the customer must pick 32 cm first (never auto-switch the size)
     Haptics.selectionAsync().catch(() => {});
     const radio = list.some((x) => x.default); // groups with a default behave like radio buttons
     setOptKeys((prev) => {
       if (radio) return [...prev.filter((k) => !list.some((x) => x.key === k)), o.key];
       return prev.includes(o.key) ? prev.filter((k) => k !== o.key) : [...prev, o.key];
     });
-    if (o.only_sizes.length && size && !o.only_sizes.includes(size.key)) setSizeKey(o.only_sizes[0]);
   };
   const toggleIngredient = (ing: Ingredient) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -212,6 +215,7 @@ export default function ProductScreen() {
                   return (
                     <Pressable key={s.key} testID={`size-option-${s.key}`} onPress={() => selectSize(s.key)} style={[styles.sizeCard, on && styles.sizeCardOn]}>
                       <Text style={[styles.sizeLabel, on && styles.sizeLabelOn]}>{s.label}</Text>
+                      {SIZE_GUIDE[s.key] ? <Text style={styles.sizeGuide} testID={`size-guide-${s.key}`}>{SIZE_GUIDE[s.key]}</Text> : null}
                       <Text style={[styles.sizePrice, on && styles.sizeLabelOn]}>{chf(s.price)}</Text>
                     </Pressable>
                   );
@@ -230,11 +234,11 @@ export default function ProductScreen() {
                   const ok = optionAllowed(o);
                   const p = optionPrice(o);
                   return (
-                    <Pressable key={o.key} testID={`option-${o.key}`} onPress={() => chooseOption(o, list)} style={[styles.extraRow, i < list.length - 1 && styles.extraRowBorder, !ok && { opacity: 0.45 }]}>
+                    <Pressable key={o.key} testID={`option-${o.key}`} disabled={!ok} onPress={() => chooseOption(o, list)} style={[styles.extraRow, i < list.length - 1 && styles.extraRowBorder, !ok && { opacity: 0.45 }]}>
                       <View style={[styles.radio, on && styles.radioOn]}>{on ? <Feather name="check" size={14} color={colors.onBrandPrimary} /> : null}</View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.extraName}>{tx(o.name)}</Text>
-                        {o.only_sizes.length ? <Text style={styles.extraPrice}>{o.only_sizes.map((k) => product.sizes.find((s) => s.key === k)?.label ?? k).join(", ")}</Text> : null}
+                        {o.only_sizes.length ? <Text style={styles.extraPrice} testID={`option-${o.key}-sizes`}>{t("onlyInSizes").replace("{sizes}", o.only_sizes.map((k) => `${k} cm`).join(", "))}</Text> : null}
                       </View>
                       <Text style={styles.optPrice}>{p > 0 ? `+ ${chf(p)}` : ""}</Text>
                     </Pressable>
@@ -335,6 +339,7 @@ const useStyles = makeStyles((colors) => ({
   hint: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted, marginTop: 4, marginBottom: 12 },
   wrapChips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sizeRow: { flexDirection: "row", gap: 10, marginTop: 12 },
+  sizeGuide: { fontSize: 12, lineHeight: 16, textAlign: "center", opacity: 0.8 },
   sizeCard: { flex: 1, height: 76, borderRadius: 18, borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.surfaceSecondary, alignItems: "center", justifyContent: "center", gap: 2 },
   sizeCardOn: { borderColor: colors.surfaceInverse, backgroundColor: colors.surfaceInverse },
   sizeLabel: { fontFamily: FONT_DISPLAY, fontSize: 20, color: colors.onSurface },

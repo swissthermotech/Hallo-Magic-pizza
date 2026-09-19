@@ -27,6 +27,11 @@ function timeSlots(): string[] {
   return out;
 }
 
+const WEEKDAYS = {
+  fr: ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"],
+  de: ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"],
+};
+
 export default function CheckoutScreen() {
   const styles = useStyles();
   const { colors } = useTheme();
@@ -68,8 +73,10 @@ export default function CheckoutScreen() {
   useEffect(() => {
     if (!asapAvailable && timeMode === "asap") setTimeMode("scheduled");
   }, [asapAvailable, timeMode]);
+  // Weekday in the customer's language (backend sends French names only)
+  const weekday = (iso: string) => WEEKDAYS[lang === "de" ? "de" : "fr"][new Date(iso + "T12:00:00").getDay()];
   const dayLabel = (d: { date: string; weekday: string; is_today: boolean; is_tomorrow: boolean }) =>
-    d.is_today ? t("today") : d.is_tomorrow ? t("tomorrow") : `${d.weekday} ${d.date.slice(8, 10)}.${d.date.slice(5, 7)}`;
+    d.is_today ? t("today") : d.is_tomorrow ? t("tomorrow") : `${weekday(d.date)} ${d.date.slice(8, 10)}.${d.date.slice(5, 7)}`;
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
   // Optional account: prefill contact details + saved addresses (guest checkout unchanged)

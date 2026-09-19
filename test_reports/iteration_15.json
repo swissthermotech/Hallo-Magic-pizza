@@ -1,0 +1,23 @@
+{
+  "summary": "Frontend-only regression on the 4 new customer-UI changes. All four features work as specified in FR & DE. (1) Product page: size-guide 32=👤 / 40=👥 / 50=👥👥 render; option-gluten_free is disabled at 40 & 50 cm with hint 'Disponible uniquement en 32 cm' (DE 'Nur in 32 cm erhältlich') and does NOT switch the size when tapped (total stays 22.00/31.00); after selecting 32 cm, gluten becomes selectable and total goes to CHF 18.00. Product Mickey (only 26 cm) shows no size-guide and the gluten option is disabled (opacity 0.45) with the same hint. (2) Pizza du mois: after PUT Napoletana highlight='moment', the Pizzas section on home shows Napoletana first with testID product-month-<id> and badge 'PIZZA DU MOIS', then 'Créer votre pizza', then regular pizzas. Switching the flag to Margherita moves it to first place (badge text 'MONATSPIZZA' in DE). Highlights reset to null and /api/menu now returns no product with highlight='moment'. (3) DE checkout scheduled-order day chips render German weekday names (Dienstag 22.09, Mittwoch 23.09, Donnerstag 24.09, Freitag 25.09, Samstag 26.09, Sonntag 27.09) that match the actual weekdays of the ISO dates; no French weekday names appear. (4) FR regression: home category tabs = Tout | Entrées | Salades | Pizzas | Piadina & Pasta | Desserts | Boissons; add-to-cart increments the cart badge (0→1); checkout still shows the E-mail field and the ESPÈCES / CARTE (TERMINAL) choice; the confirm-order button was NOT tapped anywhere. No orders were created, accepted or modified.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/tmp/pizza_month.py"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "app/(tabs)/index.tsx: when no product has highlight='moment', the 'Créer votre pizza' cards are still placed before regular pizzas. This matches the spec but confirm with product owner that this is the desired steady-state ordering.",
+    "product/[id].tsx line 65 optionAllowed helper is called on every render for every option – fine at current option counts, but keep an eye on it if the option list grows."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped as requested)", "frontend": "100%"},
+  "seed_data_creation": "Temporarily set product.highlight='moment' on Napoletana then on Margherita to verify Pizza du mois ordering; both highlights were RESET to null at the end via manager-authenticated PUT /api/products/{id}. Verified via GET /api/menu that no product has highlight='moment'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "PrintNode is live: never POST /api/orders or change order status. Manager PIN=1234. Reference IDs used: Margherita=6aa94a928068d15c2420f9e5, Napoletana=6aa94a928068d15c2420f9e6, Mickey (26 cm only)=6aa94a928068d15c2420f9fe. Home Pizzas section ordering logic lives in app/(tabs)/index.tsx lines 94-99. DE weekdays live in checkout.tsx lines 31/77.",
+  "rca_of_issue": ""
+}
