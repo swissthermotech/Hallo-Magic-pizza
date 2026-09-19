@@ -180,3 +180,4 @@ hallomagicpizza.ch is read-only reference only (menu, prices, sizes, extras, del
 - Supplements per line: verified in real cart (3× Margherita each with 2× Jambon) + backend compute – no change needed.
 - Verified in browser: mute stops the 20 s repeat, unmute resumes; CONFIRMER 19:30 accept keeps requested time; Poste 2 UI minute chips; admin legal fields. Driver quick-assign requires an OPEN shift (buttons show "service fermé" otherwise – existing behaviour).
 - DEVELOPMENT FINISHED. Remaining = restaurant content/config (see final report in chat).
+- Ticket FINAL (iter 24): order number "#1474" (2×) now ABOVE the LIVRAISON/RETRAIT band; payment on one bold double-height line "À ENCAISSER · TERMINAL|ESPÈCES · CHF 36.00" (DEJA PAYE unchanged). Verified in-process only, cp1252 OK, no print sent.

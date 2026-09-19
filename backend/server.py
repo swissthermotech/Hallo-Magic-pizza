@@ -1772,12 +1772,13 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     lines: List[str] = [c(settings.restaurant_name.upper())]
     if reprint:
         lines += [c("*** REIMPRESSION ***")]
-    # ---- 1. LIVRAISON / RETRAIT – biggest text; delivery = white-on-black band, pickup = starred frame -----
+    # ---- 1. Order number, then LIVRAISON / RETRAIT (biggest text, slightly lower so it shows in the ticket holder);
+    #         delivery = white-on-black band, pickup = starred frame --------------------------------------------
+    lines += [mid(f"#{o['order_number']}")]
     if delivery:
         lines += ["#" * W, huge("LIVRAISON", True), "#" * W]
     else:
         lines += ["*" * W, huge("RETRAIT"), "*" * W]
-    lines += [mid(f"#{o['order_number']}")]
     requested = o.get("requested_time") if o.get("requested_time") not in (None, "", "asap") else None
     confirmed = fmt_time(o["estimated_ready_at"]) if o.get("estimated_ready_at") else None
     ready_dt = o.get("estimated_ready_at") or o.get("scheduled_for")
@@ -1820,7 +1821,7 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     if o.get("payment_collected") or method == "none":
         lines += [tall("DEJA PAYE")]
     else:
-        lines += [tall(f"A ENCAISSER  {amount}"), tall("TERMINAL" if method == "terminal" else "ESPECES")]
+        lines += [tall(f"À ENCAISSER · {'TERMINAL' if method == 'terminal' else 'ESPÈCES'} · {amount}")]  # one bold line
     # ---- 4. ITEMS – "1x 50 CM  NOM" whole line bold 2x (one line when it fits); supplements smaller, indented -----
     def size_txt(it):
         return it["size"]["label"].upper().replace("CM", "").strip() + " CM" if it.get("size") else ""
