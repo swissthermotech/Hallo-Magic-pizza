@@ -91,12 +91,15 @@ export default function MenuScreen() {
     return cats
       .map((c) => {
         let products = c.filter ? data.products.filter((p) => p.options.some((o) => o.key === c.filter)) : data.products.filter((p) => p.category_id === c.id);
-        if (c.slug === PIZZA_SLUG && customCat) {
-          // Order inside Pizzas: 1) Pizza du mois  2) Créez votre pizza  3) regular pizzas
-          const custom = data.products.filter((p) => p.category_id === customCat.id);
-          const month = [...products, ...custom].filter((p) => p.highlight === "moment");
+        if (c.slug === PIZZA_SLUG) {
+          // Forced order inside Pizzas, whatever the products' normal sort/category:
+          // 1) the active Pizza du mois (any product flagged "moment")  2) Créez votre pizza  3) regular pizzas
+          const month = data.products.filter((p) => p.highlight === "moment");
+          const custom = customCat ? data.products.filter((p) => p.category_id === customCat.id && p.highlight !== "moment") : [];
           const rest = products.filter((p) => p.highlight !== "moment");
-          products = [...month, ...custom.filter((p) => p.highlight !== "moment"), ...rest];
+          products = [...month, ...custom, ...rest];
+        } else {
+          products = products.filter((p) => p.highlight !== "moment"); // the Pizza du mois is shown in Pizzas only
         }
         const rows: Product[][] = [];
         for (let i = 0; i < products.length; i += cols) rows.push(products.slice(i, i + cols));

@@ -699,6 +699,8 @@ async def patch_product(product_id: str, body: ProductPatch, _: dict = Depends(M
     update = body.model_dump(exclude_unset=True)
     if not update:
         raise HTTPException(400, "Nothing to update")
+    if update.get("highlight") == "moment":  # only ONE Pizza du mois at a time (admin editor saves through PATCH)
+        await db.products.update_many({"highlight": "moment", "_id": {"$ne": oid(product_id)}}, {"$set": {"highlight": None}})
     doc = await db.products.find_one_and_update({"_id": oid(product_id)}, {"$set": update}, return_document=ReturnDocument.AFTER)
     if not doc:
         raise HTTPException(404, "Product not found")

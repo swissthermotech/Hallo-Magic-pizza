@@ -1,0 +1,51 @@
+{
+  "summary": "Verified 'Pizza du mois' fix end-to-end via Admin editor UI + customer menu (FR & DE, desktop & mobile) + dynamic PATCH switch + reset. All 5 acceptance checks PASS. Backend enforces single 'moment' (auto-unflag previous). Customer Pizzas section renders in the forced order: Pizza du mois (with badge product-month-<id>) → Créer votre pizza → regular pizzas. Diavola appears only once in 'Tout'. No orders were created or modified during testing (last order timestamp is prior to test start). All products reset to highlight=null at the end (0 products flagged 'moment' in final GET /api/menu).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "index.tsx sections builder correctly (a) prepends any product flagged highlight='moment' inside the Pizzas section regardless of its category (line 97-100) and (b) filters it out of every other section (line 102), so a moment product from a non-Pizza category would also appear once in Pizzas – behaviour matches the spec.",
+    "server.py PATCH /api/products/{id} unflags previous 'moment' before setting the new one (line 702-703) – uniqueness maintained even when clients only send {highlight:'moment'}.",
+    "Minor UX: after tapping 'Enregistrer' in the product editor, an ephemeral toast 'The action GO_BACK was not handled' shows when the editor was reached via deep link – noted in the request as expected and to be ignored."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None. Test only mutated product.highlight fields on 4 pizzas (Quattro Stagioni, Margherita, Diavola, Calabrese) via the Admin UI and one PATCH; all reset to null at end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Manager PIN 1234 works (staff-pin-input testID). Product editor deep link /staff/admin/product/<id> works after login. Menu polls every 8s – 10s wait is enough to see PATCH changes reflected in the UI. Backend PATCH auto-unflags previous 'moment'. PrintNode is LIVE; never create/accept orders. Do not run pytest suites.",
+  "rca_of_issue": "Original bug: 'Pizza du mois is not appearing first in Pizzas'. Fix (verified): (1) frontend/app/(tabs)/index.tsx now builds the Pizzas section as [moment products, custom-pizza products, other pizzas], forcing order 1 for the flagged product regardless of its natural sort/category; (2) backend/server.py PATCH /api/products/{id} atomically clears any other product's highlight='moment' before applying the update, guaranteeing uniqueness across all admin edit paths. Reproduction confirmed and fix confirmed on live preview URL.",
+  "detailed_results": {
+    "admin_ui_flow": {
+      "quattro_stagioni_flagged_via_editor": "PASS – hint editor-month-hint appeared, editor-save clicked, GET /api/menu -> only Quattro Stagioni has highlight 'moment'.",
+      "margherita_flagged_via_editor": "PASS – GET /api/menu -> only Margherita 'moment' (Quattro Stagioni auto-cleared to null).",
+      "diavola_flagged_via_editor": "PASS – GET /api/menu -> only Diavola 'moment' (Margherita auto-cleared)."
+    },
+    "customer_menu_fr": {
+      "desktop_1280_pizzas_order": ["Diavola (badge PIZZA DU MOIS)", "Créer votre pizza", "Margherita", "Napoletana", "Prosciutto", "Prosciutto e Funghi"],
+      "badge_testid": "product-month-6aa94a928068d15c2420f9ea",
+      "badge_text": "PIZZA DU MOIS",
+      "diavola_count_in_tout_view": 1,
+      "mobile_390_pizzas_order": ["Diavola (badge PIZZA DU MOIS)", "Créer votre pizza", "Margherita", "Napoletana", "Prosciutto", "Prosciutto e Funghi"]
+    },
+    "customer_menu_de": {
+      "pizzas_order": ["Diavola (badge MONATSPIZZA)", "Créer votre pizza", "Margherita", "Napoletana", "Prosciutto", "Prosciutto e Funghi"],
+      "badge_text": "MONATSPIZZA"
+    },
+    "dynamic_switch_calabrese": {
+      "patch_result": "highlight=moment applied on Calabrese; backend auto-cleared Diavola",
+      "customer_ui_after_10s_poll": "Calabrese first with badge product-month-<id>, Diavola back in normal position (badge absent)"
+    },
+    "reset": {
+      "products_reset": 1,
+      "final_moment_count": 0
+    },
+    "no_orders_touched": "Confirmed – latest order in DB is from 2026-09-19T23:31 (before test start)."
+  }
+}
