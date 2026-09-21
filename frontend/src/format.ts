@@ -21,6 +21,12 @@ export function fmtTime(s?: string | null): string {
   return d.toLocaleTimeString("fr-CH", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Zurich" });
 }
 
+export function fmtDate(s?: string | null): string {
+  const d = parseUTC(s);
+  if (!d || isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("fr-CH", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/Zurich" });
+}
+
 export function minutesUntil(s?: string | null): number | null {
   const d = parseUTC(s);
   if (!d) return null;

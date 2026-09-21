@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -32,12 +32,14 @@ export default function AccountScreen() {
 // ---------------------------------------------------------------------------
 function AuthForm() {
   const styles = useStyles();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { t } = useI18n();
   const toast = useToast();
   const { login, register } = useAuth();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [f, setF] = useState({ first_name: "", last_name: "", phone: "", email: "", password: "" });
+  const [marketing, setMarketing] = useState(false); // optional, unchecked by default
   const [busy, setBusy] = useState(false);
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
 
@@ -49,7 +51,7 @@ function AuthForm() {
     setBusy(true);
     try {
       if (mode === "login") await login(f.phone.trim(), f.password);
-      else await register({ first_name: f.first_name.trim(), last_name: f.last_name.trim(), phone: f.phone.trim(), email: f.email.trim() || undefined, password: f.password });
+      else await register({ first_name: f.first_name.trim(), last_name: f.last_name.trim(), phone: f.phone.trim(), email: f.email.trim() || undefined, password: f.password, marketing_consent: marketing });
       toast.show(`${t("welcome")} !`, "success");
     } catch (e: any) {
       toast.show(e?.message || "Erreur", "error");
@@ -73,6 +75,12 @@ function AuthForm() {
       <Field label={`${t("phone")} *`} value={f.phone} onChangeText={set("phone")} keyboardType="phone-pad" placeholder="079 123 45 67" testID="auth-phone" />
       {mode === "register" ? <Field label={t("email")} value={f.email} onChangeText={set("email")} keyboardType="email-address" autoCapitalize="none" testID="auth-email" /> : null}
       <Field label={`${t("password")} *`} value={f.password} onChangeText={set("password")} secureTextEntry autoCapitalize="none" placeholder={mode === "register" ? t("passwordHint") : undefined} testID="auth-password" />
+      {mode === "register" ? (
+        <Pressable testID="auth-marketing-checkbox" onPress={() => setMarketing((v) => !v)} style={styles.checkRow} accessibilityRole="checkbox" accessibilityState={{ checked: marketing }}>
+          <View style={[styles.checkbox, marketing && styles.checkboxOn]}>{marketing ? <Feather name="check" size={16} color={colors.onBrandPrimary} /> : null}</View>
+          <Text style={styles.checkText} testID="auth-marketing-text">{t("marketingConsent")}</Text>
+        </Pressable>
+      ) : null}
       <Button title={mode === "login" ? t("login") : t("register")} size="lg" icon={mode === "login" ? "log-in" : "user-plus"} loading={busy} onPress={submit} testID="auth-submit" />
       <Pressable testID="auth-switch-mode" onPress={() => setMode(mode === "login" ? "register" : "login")} style={{ paddingVertical: 8 }}>
         <Text style={styles.link}>{mode === "login" ? `${t("noAccountYet")} ${t("register")}` : `${t("alreadyAccount")} ${t("login")}`}</Text>
@@ -92,7 +100,7 @@ function Profile() {
   const router = useRouter();
   const { t, tx } = useI18n();
   const toast = useToast();
-  const { user, logout, updateProfile, deleteAddress } = useAuth();
+  const { user, logout, updateProfile, deleteAddress, setMarketing } = useAuth();
   const { data: orders } = useMyAccountOrders(true);
   const u = user!;
   const [edit, setEdit] = useState(false);
@@ -165,6 +173,15 @@ function Profile() {
         </View>
       </View>
 
+      {/* Marketing preference – account holders can opt in or withdraw at any time */}
+      <View>
+        <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>{t("marketingTitle")}</Text>
+        <View style={[styles.card, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
+          <Text style={[styles.info, { flex: 1 }]} testID="profile-marketing-text">{t("marketingConsent")}</Text>
+          <Switch testID="profile-marketing-switch" value={!!u.marketing_consent} disabled={busy} onValueChange={(v) => { setBusy(true); setMarketing(v).then(() => toast.show(v ? t("marketingOn") : t("marketingOff"), "success")).catch((e) => toast.show(e.message, "error")).finally(() => setBusy(false)); }} trackColor={{ true: colors.success, false: colors.borderStrong }} thumbColor={colors.surfaceSecondary} />
+        </View>
+      </View>
+
       {/* Order history */}
       <View>
         <Text style={[styles.sectionTitle, { marginBottom: 8 }]}>{t("orderHistory")}</Text>
@@ -212,4 +229,8 @@ const useStyles = makeStyles((colors) => ({
   iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceTertiary },
   num: { fontFamily: FONT_DISPLAY, fontSize: 20, color: colors.onSurface },
   total: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.onSurface, marginTop: 4 },
+  checkRow: { flexDirection: "row", gap: 12, alignItems: "center", paddingVertical: 4 },
+  checkbox: { width: 26, height: 26, borderRadius: 7, borderWidth: 2, borderColor: colors.borderStrong, alignItems: "center", justifyContent: "center" },
+  checkboxOn: { backgroundColor: colors.brandPrimary, borderColor: colors.brandPrimary },
+  checkText: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.onSurface, flex: 1 },
 }));

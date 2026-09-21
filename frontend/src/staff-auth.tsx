@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { storage } from "@/src/utils/storage";
-import { api, setStaffToken } from "@/src/api";
+import { api, setStaffToken, setStaffUnauthorizedHandler } from "@/src/api";
 
 const KEY = "staff_session";
 export type StaffRole = "manager" | "kitchen" | "phone" | "driver1" | "driver2" | "driver3";
@@ -62,6 +62,16 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
     setStaffToken(null);
     storage.secureRemove(KEY);
   }, []);
+
+  // Expired / revoked staff token (401 on any staff request, e.g. an iPad left open overnight): lock immediately so the
+  // person sees the PIN screen with the reason instead of silently failing saves while the (public) menu still displays.
+  useEffect(() => {
+    setStaffUnauthorizedHandler((message) => {
+      setLastError(message || "Session expirée – veuillez saisir votre code");
+      lock();
+    });
+    return () => setStaffUnauthorizedHandler(null);
+  }, [lock]);
 
   const value = useMemo<StaffCtx>(() => {
     const role = session?.role ?? null;

@@ -53,6 +53,7 @@ class RegisterIn(BaseModel):
     phone: str = Field(min_length=7)
     email: Optional[str] = None
     password: str = Field(min_length=6, max_length=128)
+    marketing_consent: bool = False  # optional e-mail offers – unchecked by default, never required
 
 
 class LoginIn(BaseModel):
@@ -75,6 +76,7 @@ class UserOut(BaseModel):
     email: Optional[str] = None
     addresses: List[SavedAddress] = []
     created_at: datetime
+    marketing_consent: Optional[bool] = None  # current opt-in state (filled by the account endpoints)
 
 
 class TokenOut(BaseModel):
@@ -86,6 +88,14 @@ class TokenOut(BaseModel):
 def user_out(doc: dict) -> UserOut:
     return UserOut(id=str(doc["_id"]), first_name=doc["first_name"], last_name=doc.get("last_name", ""), phone=doc["phone"],
                    email=doc.get("email"), addresses=[SavedAddress(**a) for a in doc.get("addresses", [])], created_at=doc["created_at"])
+
+
+async def user_out_full(doc: dict) -> UserOut:
+    """Profile + current marketing consent (stored per phone identity, see customers.py)."""
+    import customers
+    out = user_out(doc)
+    out.marketing_consent = (await customers.get_consent(doc["phone"]))["consent"]
+    return out
 
 
 def make_token(user_id: ObjectId) -> str:
@@ -135,13 +145,33 @@ async def register(body: RegisterIn):
         await db.users.update_one({"_id": existing["_id"]}, {"$set": {"password_hash": password_hash.hash(body.password), "first_name": body.first_name.strip(),
                                                                        "last_name": body.last_name.strip() or existing.get("last_name", ""), "email": (body.email or "").strip().lower() or existing.get("email")}})
         existing = await db.users.find_one({"_id": existing["_id"]})
-        return TokenOut(access_token=make_token(existing["_id"]), user=user_out(existing))
+        if body.marketing_consent:
+            await _consent(existing, True, "account")
+        return TokenOut(access_token=make_token(existing["_id"]), user=await user_out_full(existing))
     doc = {"first_name": body.first_name.strip(), "last_name": body.last_name.strip(), "phone": phone,
            "email": (body.email or "").strip().lower() or None, "password_hash": password_hash.hash(body.password),
            "addresses": [], "created_at": datetime.now(timezone.utc)}
     res = await db.users.insert_one(doc)
     doc["_id"] = res.inserted_id
-    return TokenOut(access_token=make_token(res.inserted_id), user=user_out(doc))
+    if body.marketing_consent:  # explicit opt-in only
+        await _consent(doc, True, "account")
+    return TokenOut(access_token=make_token(res.inserted_id), user=await user_out_full(doc))
+
+
+async def _consent(user: dict, consent: bool, source: str):
+    import customers
+    await customers.set_consent(user["phone"], consent, source, email=user.get("email"), first_name=user.get("first_name"), last_name=user.get("last_name"))
+
+
+class MarketingIn(BaseModel):
+    consent: bool
+
+
+@router.put("/me/marketing", response_model=UserOut)
+async def update_marketing(body: MarketingIn, user=Depends(current_user)):
+    """Account holders opt in / withdraw at any time from their profile."""
+    await _consent(user, body.consent, "account")
+    return await user_out_full(user)
 
 
 @router.post("/login", response_model=TokenOut)
@@ -154,12 +184,12 @@ async def login(body: LoginIn):
         valid = False
     if not user or not user.get("password_hash") or not valid:
         raise HTTPException(401, "Téléphone ou mot de passe incorrect")
-    return TokenOut(access_token=make_token(user["_id"]), user=user_out(user))
+    return TokenOut(access_token=make_token(user["_id"]), user=await user_out_full(user))
 
 
 @router.get("/me", response_model=UserOut)
 async def me(user=Depends(current_user)):
-    return user_out(user)
+    return await user_out_full(user)
 
 
 @router.put("/me", response_model=UserOut)

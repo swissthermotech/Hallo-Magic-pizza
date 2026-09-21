@@ -101,6 +101,28 @@ export interface User {
   email?: string | null;
   addresses: SavedAddress[];
   created_at: string;
+  marketing_consent?: boolean | null;
+}
+
+/** Staff customer database (aggregated from accounts + orders, one row per phone identity). */
+export interface MarketingConsent { consent: boolean; at?: string | null; source?: string | null }
+export interface CustomerSummary {
+  key: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email?: string | null;
+  kind: "account" | "staff" | "guest";
+  addresses: string[];
+  orders_count: number;
+  total_spent: number;
+  last_order_at?: string | null;
+  first_order_at?: string | null;
+  created_at?: string | null;
+  marketing: MarketingConsent;
+}
+export interface CustomerProfile extends CustomerSummary {
+  orders: Order[];
 }
 
 export interface DeliveryZone {
@@ -237,6 +259,7 @@ export interface Order {
   age_confirmed: boolean;
   age_required?: 16 | 18 | null;
   user_id?: string | null;
+  marketing_consent?: boolean | null;
   station?: number | null;
   driver?: string | null;
   driver_name?: string | null;

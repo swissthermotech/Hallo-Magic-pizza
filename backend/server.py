@@ -19,6 +19,7 @@ import auth as auth_mod
 import photos as photos_mod
 import staff_auth as staff_mod
 import review_email as review_mod
+import customers as customers_mod
 from fastapi.responses import RedirectResponse
 import hours as hours_mod
 from fastapi.security import HTTPAuthorizationCredentials
@@ -365,6 +366,7 @@ class OrderIn(BaseModel):
     save_address: bool = False  # logged-in customers: store the delivery address in the profile
     language: str = "fr"
     payment_method: str = "cash"  # how the customer will pay at handover: "cash" (ESPÈCES) | "terminal" (CARTE) – no online payment
+    marketing_consent: bool = False  # optional e-mail offers opt-in ticked at checkout (never required, unchecked by default)
 
 
 PAYMENT_METHODS = {
@@ -463,6 +465,7 @@ class Order(BaseDocument):
     age_confirmed: bool = False
     age_required: Optional[int] = None  # 16 (beer/wine) or 18 (spirits) – staff/driver must check ID at handover
     user_id: Optional[str] = None       # customer account (None = guest)
+    marketing_consent: Optional[bool] = None  # what the customer ticked at this checkout (audit; None = not asked, e.g. phone orders)
     station: Optional[int] = None       # phone orders: iPad "Poste 1" / "Poste 2"
     driver: Optional[str] = None        # delivery: "Livreur 1" / "Livreur 2" / "Livreur 3"
     driver_name: Optional[str] = None   # person who did the delivery (snapshot; updated to the performer on "livrée") – kept in history
@@ -561,6 +564,7 @@ async def seed():
     await db.categories.update_one({"slug": "pizza", "name.fr": "Pizza"}, {"$set": {"name": {"fr": "Pizzas", "de": "Pizzas"}}})
     await db.categories.update_one({"slug": "dessert", "name.fr": "Dessert"}, {"$set": {"name": {"fr": "Desserts", "de": "Desserts"}}})
     await auth_mod.ensure_indexes()
+    await customers_mod.ensure_indexes()
     await staff_mod.seed_staff_pins()
     cur = await db.settings.find_one({"_id": "main"})
     if cur is not None and cur.get("opening_hours"):
@@ -722,15 +726,24 @@ async def list_extras():
 
 @api.post("/extras", response_model=Extra)
 async def create_extra(body: ExtraIn, _: dict = Depends(MANAGER)):
-    if await db.extras.find_one({"key": body.key}):
-        raise HTTPException(400, "Extra key already exists")
+    # Key must be unique: derive a free variant instead of blocking the restaurant (jambon, jambon_2, ...)
+    base = re.sub(r"[^a-z0-9]+", "_", body.key.strip().lower()).strip("_") or "supplement"
+    key, n = base, 2
+    while await db.extras.find_one({"key": key}):
+        key, n = f"{base}_{n}", n + 1
+    body.key = key
     res = await db.extras.insert_one(Extra(**body.model_dump()).to_mongo())
+    # A new supplement is offered on every customizable product (pizzas) by default – the admin can still
+    # restrict it per product in the product editor. $addToSet never touches other supplements.
+    await db.products.update_many({"customizable": True, "deleted_at": None}, {"$addToSet": {"allowed_extra_ids": key}})
     return Extra.from_mongo(await db.extras.find_one({"_id": res.inserted_id}))
 
 
 @api.put("/extras/{extra_id}", response_model=Extra)
 async def update_extra(extra_id: str, body: ExtraIn, _: dict = Depends(MANAGER)):
-    doc = await db.extras.find_one_and_update({"_id": oid(extra_id)}, {"$set": body.model_dump()}, return_document=ReturnDocument.AFTER)
+    upd = body.model_dump()
+    upd.pop("key", None)  # the key links the supplement to the products' allowed lists and past orders – never changes
+    doc = await db.extras.find_one_and_update({"_id": oid(extra_id)}, {"$set": upd}, return_document=ReturnDocument.AFTER)
     if not doc:
         raise HTTPException(404, "Extra not found")
     return Extra.from_mongo(doc)
@@ -1104,10 +1117,13 @@ async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.op
     if body.payment_method in ("cash", "terminal"):
         order.payment_method = body.payment_method  # drives ticket "A ENCAISSER · ESPECES/TERMINAL", driver screen and Clôture buckets
     doc = order.to_mongo()
+    doc["marketing_consent"] = bool(body.marketing_consent)
     doc.update(collection_fields(order.payment_method, order.total))
     res = await db.orders.insert_one(doc)
     if user and body.save_address and body.type == "delivery" and body.address:
         await auth_mod.save_address_for_user(user, body.address.model_dump())
+    if body.marketing_consent:  # explicit opt-in only – an unticked box never changes an existing consent
+        await customers_mod.set_consent(body.customer.phone, True, "checkout", email=email, first_name=body.customer.first_name, last_name=body.customer.last_name)
     return Order.from_mongo(await db.orders.find_one({"_id": res.inserted_id}))
 
 
@@ -1996,6 +2012,7 @@ async def print_receipt(order_id: str, body: PrintIn = PrintIn(), _: dict = Depe
 api.include_router(auth_mod.router)
 api.include_router(staff_mod.router)
 api.include_router(auth_mod.customers_router)
+api.include_router(customers_mod.router)
 api.include_router(photos_mod.router)
 app.include_router(api)
 

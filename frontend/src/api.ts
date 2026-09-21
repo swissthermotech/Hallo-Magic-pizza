@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress } from "./types";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress, CustomerProfile, CustomerSummary } from "./types";
 
 const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
 
@@ -41,14 +42,30 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...authHeaders(path), ...(init?.headers || {}) },
   });
   if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const j = await res.json();
-      detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
-    } catch {}
-    throw new ApiError(res.status, detail);
+    throw await toApiError(res, path);
   }
   return res.json();
+}
+
+/** Staff session expired / revoked (401 on a staff request) -> the StaffProvider locks and shows the PIN screen. */
+let onStaffUnauthorized: ((message: string) => void) | null = null;
+export const setStaffUnauthorizedHandler = (fn: ((message: string) => void) | null) => {
+  onStaffUnauthorized = fn;
+};
+
+async function toApiError(res: Response, path: string): Promise<ApiError> {
+  // HTTP/2 has no status text and gateway errors (413 / 502 / 504) return HTML -> always produce a readable message
+  let detail = "";
+  try {
+    const j = await res.json();
+    detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail);
+  } catch {}
+  if (!detail) {
+    detail = res.status === 413 ? "Fichier trop volumineux pour le serveur (HTTP 413)" : `Erreur serveur (HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ""})`;
+  }
+  const staffRequest = !!staffToken && !(CUSTOMER_PATHS.some((p) => path.startsWith(p)) || path === "/orders");
+  if (res.status === 401 && staffRequest && onStaffUnauthorized) onStaffUnauthorized(detail);
+  return new ApiError(res.status, detail);
 }
 
 export const api = {
@@ -136,6 +153,7 @@ export interface PlaceOrderPayload {
   save_address?: boolean;
   language: string;
   payment_method: "cash" | "terminal"; // how the customer will pay at handover (no online payment)
+  marketing_consent?: boolean; // optional e-mail offers opt-in (unchecked by default)
 }
 
 export function usePlaceOrder() {
@@ -163,6 +181,7 @@ export function usePlaceOrder() {
         save_address: !!p.save_address,
         language: p.language,
         payment_method: p.payment_method,
+        marketing_consent: !!p.marketing_consent,
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
   });
@@ -259,10 +278,11 @@ export interface AuthResponse {
   user: User;
 }
 export const authApi = {
-  register: (body: { first_name: string; last_name: string; phone: string; email?: string; password: string }) => api.post<AuthResponse>("/auth/register", body),
+  register: (body: { first_name: string; last_name: string; phone: string; email?: string; password: string; marketing_consent?: boolean }) => api.post<AuthResponse>("/auth/register", body),
   login: (body: { phone: string; password: string }) => api.post<AuthResponse>("/auth/login", body),
   me: () => api.get<User>("/auth/me"),
   updateProfile: (body: { first_name: string; last_name: string; phone: string; email?: string }) => api.put<User>("/auth/me", body),
+  setMarketing: (consent: boolean) => api.put<User>("/auth/me/marketing", { consent }),
   addAddress: (body: Omit<SavedAddress, "id">) => api.post<User>("/auth/me/addresses", body),
   updateAddress: (id: string, body: Omit<SavedAddress, "id">) => api.put<User>(`/auth/me/addresses/${id}`, body),
   deleteAddress: (id: string) => api.del<User>(`/auth/me/addresses/${id}`),
@@ -279,6 +299,31 @@ export function useCustomerSearch(phone: string) {
     queryFn: () => api.get<{ accounts: User[]; orders: Order[] }>(`/customers/search?phone=${encodeURIComponent(q)}`),
     enabled: q.length >= 3,
   });
+}
+
+// ---- Customer database (staff: manager / phone) ----
+export function useCustomers(q: string, marketing: "all" | "yes" | "no") {
+  return useQuery({
+    queryKey: ["customers", "list", q.trim(), marketing],
+    queryFn: () => api.get<{ customers: CustomerSummary[]; count: number; stats: { total: number; accounts: number; marketing_yes: number } }>(`/customers?q=${encodeURIComponent(q.trim())}&marketing=${marketing}`),
+    refetchInterval: 15000,
+  });
+}
+export function useCustomerProfile(key: string | undefined) {
+  return useQuery({ queryKey: ["customers", "profile", key], queryFn: () => api.get<CustomerProfile>(`/customers/${key}/profile`), enabled: !!key, refetchInterval: 10000 });
+}
+export function useSetCustomerMarketing() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, consent }: { key: string; consent: boolean }) => api.put<{ consent: boolean; at: string | null; source: string | null }>(`/customers/${key}/marketing`, { consent }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
+  });
+}
+/** CSV of opted-in customers (manager) – raw text, the screen downloads / shares it. */
+export async function fetchMarketingCsv(): Promise<string> {
+  const res = await fetch(`${BASE}/customers/marketing-export.csv`, { headers: authHeaders() });
+  if (!res.ok) throw await toApiError(res, "/customers/marketing-export.csv");
+  return res.text();
 }
 
 // ---- Phone orders (staff iPads) ----
@@ -341,22 +386,54 @@ export function useAssignDriver() {
 }
 
 // ---- Product photo upload (admin) ----
-export async function uploadProductPhoto(uri: string, name = "photo.jpg", type = "image/jpeg"): Promise<{ url: string; path: string; size: number }> {
+const UPLOAD_TARGET_BYTES = 900 * 1024; // stay well below typical proxy body limits (1 MB) – server re-optimises anyway
+const UPLOAD_STEPS: { edge: number; quality: number }[] = [{ edge: 1600, quality: 0.85 }, { edge: 1280, quality: 0.8 }, { edge: 1024, quality: 0.75 }, { edge: 800, quality: 0.7 }];
+
+async function toBlob(uri: string): Promise<Blob> {
+  return (await fetch(uri)).blob();
+}
+
+/** Downscale + re-encode as JPEG on the device (also converts HEIC/PNG) so uploads are small and fast. */
+async function prepareUpload(uri: string, width?: number, height?: number): Promise<{ uri: string; blob?: Blob }> {
+  const longEdge = Math.max(width || 0, height || 0);
+  for (const step of UPLOAD_STEPS) {
+    try {
+      const ctx = ImageManipulator.manipulate(uri);
+      if (longEdge > step.edge) ctx.resize(width! >= height! ? { width: step.edge } : { height: step.edge });
+      const img = await ctx.renderAsync();
+      const out = await img.saveAsync({ compress: step.quality, format: SaveFormat.JPEG });
+      img.release();
+      if (Platform.OS === "web") {
+        const blob = await toBlob(out.uri);
+        if (blob.size <= UPLOAD_TARGET_BYTES || step === UPLOAD_STEPS[UPLOAD_STEPS.length - 1]) return { uri: out.uri, blob };
+        continue;
+      }
+      // Native: file size is not exposed by the manipulator – the strongest step is only needed for very large photos
+      if (longEdge <= step.edge * 1.5 || step.edge <= 1280) return { uri: out.uri };
+    } catch (e) {
+      console.warn("[upload] image preparation failed, sending original", e);
+      break;
+    }
+  }
+  return Platform.OS === "web" ? { uri, blob: await toBlob(uri) } : { uri };
+}
+
+export async function uploadProductPhoto(uri: string, name = "photo.jpg", type = "image/jpeg", width?: number, height?: number): Promise<{ url: string; path: string; size: number }> {
+  const prepared = await prepareUpload(uri, width, height);
+  const fileName = name.replace(/\.[a-z0-9]+$/i, "") + ".jpg";
   const form = new FormData();
   if (Platform.OS === "web") {
-    const blob = await (await fetch(uri)).blob();
-    form.append("file", blob, name);
+    form.append("file", prepared.blob!, fileName);
   } else {
-    form.append("file", { uri, name, type } as any);
+    form.append("file", { uri: prepared.uri, name: fileName, type: prepared.uri !== uri ? "image/jpeg" : type } as any);
   }
-  const res = await fetch(`${BASE}/uploads/product-photo`, { method: "POST", body: form, headers: authHeaders() });
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      detail = (await res.json()).detail ?? detail;
-    } catch {}
-    throw new ApiError(res.status, detail);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/uploads/product-photo`, { method: "POST", body: form, headers: authHeaders() });
+  } catch (e: any) {
+    throw new ApiError(0, `Connexion impossible pendant l'envoi de la photo (${e?.message || "réseau"})`);
   }
+  if (!res.ok) throw await toApiError(res, "/uploads/product-photo");
   return res.json();
 }
 

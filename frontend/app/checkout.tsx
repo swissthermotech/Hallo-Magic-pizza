@@ -83,6 +83,7 @@ export default function CheckoutScreen() {
   const { user } = useAuth();
   const [savedAddrId, setSavedAddrId] = useState<string | null>(null);
   const [saveAddress, setSaveAddress] = useState(true);
+  const [marketing, setMarketing] = useState(false); // optional e-mail offers – always unchecked by default
   useEffect(() => {
     if (!user) return;
     setF((p) => ({ ...p, first_name: p.first_name || user.first_name, last_name: p.last_name || user.last_name, phone: p.phone || user.phone, email: p.email || user.email || "" }));
@@ -126,6 +127,7 @@ export default function CheckoutScreen() {
         age_confirmed: ageOk,
         save_address: !!user && type === "delivery" && !savedAddrId && saveAddress,
         language: lang,
+        marketing_consent: marketing,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       cart.addMyOrder(order.id);
@@ -257,6 +259,12 @@ export default function CheckoutScreen() {
             </View>
           </Pressable>
         ) : null}
+
+        {/* Optional marketing opt-in – unchecked by default, never required to order */}
+        <Pressable testID="marketing-consent-checkbox" onPress={() => setMarketing((v) => !v)} style={styles.checkRow} accessibilityRole="checkbox" accessibilityState={{ checked: marketing }}>
+          <View style={[styles.checkbox, styles.checkboxNeutral, marketing && styles.checkboxOn]}>{marketing ? <Feather name="check" size={16} color={colors.onBrandPrimary} /> : null}</View>
+          <Text style={[styles.checkText, { flex: 1 }]} testID="marketing-consent-text">{t("marketingConsent")}</Text>
+        </Pressable>
 
         {/* Payment */}
         <View style={{ gap: 10 }}>

@@ -53,7 +53,7 @@ export default function StaffLogin() {
             onSubmitEditing={submit}
             style={[styles.input, error && { borderColor: colors.error }]}
           />
-          {error ? <Text style={styles.error} testID="staff-pin-error">{lastError || t("wrongPin")}</Text> : null}
+          {error || lastError ? <Text style={styles.error} testID="staff-pin-error">{lastError || t("wrongPin")}</Text> : null}
           <Button title={t("unlock")} size="lg" icon="unlock" onPress={submit} disabled={pin.length < 4} testID="staff-pin-submit" />
         </View>
       </KeyboardAvoidingView>

@@ -1,0 +1,44 @@
+{
+  "summary": "Backend suite covering admin product create+persist+photo, edit+restore Margherita 40cm, supplements create/edit/delete + allowed_extra_ids propagation, customer database (list/search/filter/profile), marketing consent at checkout (both orders placed, NOT accepted) and at account registration, manager toggle, CSV export – 29 passed / 5 skipped. UI smoke on /staff/customers confirmed the flow (18 rows, TEST_ search → 3, filter yes → 2, TEST_Consent profile with orders history and Marketing:Oui badge). Found and fixed one HIGH backend bug: customers.build_profiles projected out password_hash so every account holder incorrectly rendered as kind='staff' (stats.accounts always 0). Fix applied in /app/backend/customers.py – ★ COMPTE badge now works end-to-end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/products", "issue": "Empty name.fr accepted (no min_length validator) – ProductIn model does not require non-empty name; API returns 200 with empty FR name. Frontend already blocks this via toast, but backend should also 422."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Console warning: 'shadow*' style props are deprecated on RN Web. Use 'boxShadow'. Emitted from multiple screens; not blocking but should be migrated."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter17_admin_customers.py",
+    "/app/test_reports/pytest/iter17.xml"
+  ],
+  "action_items": [
+    "Consider re-seeding phone-role PIN back to 3456 in Admin → Sécurité (currently rotated → 3 phone-role tests skipped in this iteration). Alternatively update /app/memory/test_credentials.md with the new phone PIN.",
+    "Optional: add min_length=1 to ProductIn.name.fr on the backend to complement the client-side toast validation.",
+    "Optional: migrate shadow* style props to boxShadow to silence RN Web deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "FIXED (this iteration) – customers.py build_profiles used projection {password_hash:0} but read u.get('password_hash') to decide kind → every account showed as 'staff' and stats.accounts stayed 0. Changed projection to include password_hash (still not returned to clients, only used to compute `kind`).",
+    "customers.py MarketingIn.PUT correctly rejects guest keys w/o phone (400 on ObjectId-like guest keys). Verified.",
+    "server.py POST /api/orders correctly stores order.marketing_consent and only calls set_consent when body.marketing_consent is True (never overwrites an existing consent with False from an unticked checkout box). Verified in DB after 2 orders.",
+    "photos.py upload endpoint returns /api/files/hallo-magic-pizza/products/<uuid>.jpg and re-encodes PNGs to progressive JPEG (verified 200 + image/jpeg on GET).",
+    "server.py create_extra + $addToSet on all customizable products keeps other supplements intact – verified before/after diff of GET /api/extras across 3 unrelated edits (no untouched extra was mutated).",
+    "server.py update_extra strips 'key' from the patch – verified keys unchanged after edit."
+  ],
+  "updated_files": [
+    "/app/backend/customers.py (bug fix in build_profiles projection – password_hash preserved for kind detection, still not leaked in response)",
+    "/app/backend/tests/test_iter17_admin_customers.py (new test suite)"
+  ],
+  "success_rate": {"backend": "100% (29/29 executed – 5 phone-role tests skipped due to rotated PIN)", "frontend": "smoke OK (customers list + profile + checkout consent checkbox present)"},
+  "seed_data_creation": "Created via API: 1 ZZTEST product (soft-deleted at fixture teardown), 1 zztest_truffe extra (deleted), 1 zztest_delete_me extra (deleted), 1 TEST_Account user (0799000003, kept), 2 pickup orders under TEST_NoConsent (0799000001) and TEST_Consent (0799000002) scheduled for tomorrow 17:00 – NEVER accepted (status stays pending). Cleared existing rows before running so run is idempotent. Margherita 40cm price + Champignons/Olives/Ananas all RESTORED to their original values (verified by full-diff assertions).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Manager PIN 1234 works. Phone PIN 3456 has been rotated in Admin→Sécurité → PIN unknown, phone-role tests skip. Restaurant currently closed on Mondays → schedule orders for tomorrow (Tuesday, 17:00). Two TEST_ pending orders and 1 TEST_Account user remain in DB for manual sweep. `build_profiles` was patched to include password_hash in projection (needed for kind='account').",
+  "rca_of_issue": "Root cause of the 'account holder shown as staff / ★ COMPTE badge missing / stats.accounts=0' symptom: customers.build_profiles queried users with `find({}, {'password_hash': 0})` then decided `kind = 'account' if u.get('password_hash') else 'staff'`. Because the projection stripped the field, the check was always false. Fix: switch to explicit include projection that keeps password_hash (used only for the `kind` decision inside build_profiles; the field is never placed into the returned profile dict). Verified GET /api/customers?q=TEST_Account now returns kind='account' and stats.accounts >= 1, and the UI shows the ★ COMPTE badge on the row."
+}

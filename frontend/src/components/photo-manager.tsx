@@ -50,14 +50,14 @@ export function PhotoManager({ main, extra, onChange }: Props) {
     try {
       const urls: string[] = [];
       for (const a of res.assets) {
-        const up = await uploadProductPhoto(a.uri, a.fileName || "photo.jpg", a.mimeType || "image/jpeg");
+        const up = await uploadProductPhoto(a.uri, a.fileName || "photo.jpg", a.mimeType || "image/jpeg", a.width, a.height);
         urls.push(up.url);
       }
       if (target === "main") onChange(urls[0], extra);
       else onChange(main, [...extra, ...urls]);
       toast.show(t("saved"), "success");
     } catch (e: any) {
-      toast.show(e?.message || "Upload error", "error");
+      toast.show(`${t("uploadError")}: ${e?.message || "?"}`, "error");
     } finally {
       setBusy(null);
     }

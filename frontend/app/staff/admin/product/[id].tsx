@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, Switch, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { useDeleteProduct, useMenu, useSaveProduct } from "@/src/api";
@@ -30,7 +31,9 @@ export default function ProductEditor() {
   const del = useDeleteProduct();
   const product = data?.products.find((p) => p.id === id);
 
-  const [f, setF] = useState({ nameFr: "", nameDe: "", descFr: "", descDe: "", price: "", image: "", category: "", allergFr: "", allergDe: "", originFr: "", originDe: "", ingredients: "", sizes: "", sort: "0", availableFrom: "", availableUntil: "" });
+  const [f, setF] = useState({ nameFr: "", nameDe: "", descFr: "", descDe: "", price: "", image: "", category: "", allergFr: "", allergDe: "", originFr: "", originDe: "", ingredients: "", sort: "0", availableFrom: "", availableUntil: "" });
+  // Sizes as structured rows (key | label | price as typed) – no free-text format to get wrong
+  const [sizes, setSizes] = useState<{ key: string; label: string; price: string }[]>([]);
   const [highlight, setHighlight] = useState<"" | "moment" | "custom">("");
   const [available, setAvailable] = useState(true);
   const [customizable, setCustomizable] = useState(false);
@@ -54,9 +57,9 @@ export default function ProductEditor() {
         price: String(product.price), image: product.image_url || "", category: product.category_id,
         allergFr: product.allergens.fr, allergDe: product.allergens.de, originFr: product.origin?.fr ?? "", originDe: product.origin?.de ?? "",
         ingredients: product.ingredients.map((i) => `${i.fr} | ${i.de}`).join("\n"),
-        sizes: product.sizes.map((s) => `${s.key} | ${s.label} | ${s.price}`).join("\n"),
         sort: String(product.sort ?? 0), availableFrom: product.available_from ?? "", availableUntil: product.available_until ?? "",
       });
+      setSizes(product.sizes.map((s) => ({ key: s.key, label: s.label, price: String(s.price) })));
       setHighlight((product.highlight as "" | "moment" | "custom") ?? "");
       setAvailable(product.available);
       setCustomizable(product.customizable);
@@ -73,30 +76,40 @@ export default function ProductEditor() {
       setAllowed(product.allowed_extra_ids);
     } else if (isNew) {
       setF((p) => ({ ...p, category: data.categories.find((c) => !c.filter)?.id ?? "" }));
+      setAllowed(data.extras.map((e) => e.key)); // a new customizable product offers every supplement by default
     }
     setLoaded(true);
   }, [data, product, isNew, loaded]);
 
   const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
-  const typedSizes = f.sizes.split("\n").map((l) => l.split("|")[0].trim()).filter(Boolean);
-  const sizeKeys = typedSizes.length ? typedSizes : ["32", "40", "50"];
+  const num = (v: string) => parseFloat(v.replace(",", "."));
+  const sizeKeys = sizes.map((s) => s.key.trim()).filter(Boolean).length ? sizes.map((s) => s.key.trim()).filter(Boolean) : ["32", "40", "50"];
   const extras = data?.extras ?? [];
   const allExtraKeys = extras.map((e) => e.key);
+  const PRESET_SIZES = [{ key: "32", label: "32cm" }, { key: "40", label: "40cm" }, { key: "50", label: "50cm" }];
+  const addSize = (key = "", label = "") => setSizes((p) => (key && p.some((s) => s.key === key) ? p : [...p, { key, label, price: "" }]));
+  const setSize = (i: number, patch: Partial<{ key: string; label: string; price: string }>) => setSizes((p) => p.map((s, idx) => (idx === i ? { ...s, ...patch } : s)));
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace("/staff/admin"));
 
   const submit = async () => {
-    const price = parseFloat(f.price.replace(",", "."));
-    if (!f.nameFr.trim() || isNaN(price) || !f.category) {
-      toast.show(t("required"), "error");
+    const parsedSizes = sizes.filter((s) => s.key.trim() || s.label.trim() || s.price.trim());
+    const badSize = parsedSizes.find((s) => !s.key.trim() || isNaN(num(s.price)));
+    if (badSize) {
+      toast.show(t("sizeIncomplete"), "error");
       return;
     }
+    const sizesOut = parsedSizes.map((s) => ({ key: s.key.trim(), label: s.label.trim() || `${s.key.trim()}cm`, price: num(s.price) }));
+    // Base price: required for products without sizes; with sizes it defaults to the cheapest size (shown as "dès CHF")
+    const typedPrice = f.price.trim() ? num(f.price) : NaN;
+    const price = !isNaN(typedPrice) ? typedPrice : sizesOut.length ? Math.min(...sizesOut.map((s) => s.price)) : NaN;
+    if (!f.nameFr.trim()) return toast.show(`${t("required")}: ${t("nameFr")}`, "error");
+    if (!f.category) return toast.show(`${t("required")}: ${t("category")}`, "error");
+    if (isNaN(price)) return toast.show(`${t("required")}: ${t("price")}`, "error");
     const ingredients = f.ingredients.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
       const [fr, de] = l.split("|").map((s) => s.trim());
       return { id: fr.toLowerCase().replace(/\s+/g, "_"), fr, de: de || fr };
     });
-    const sizes = f.sizes.split("\n").map((l) => l.trim()).filter(Boolean).map((l) => {
-      const [key, label, p] = l.split("|").map((s) => s.trim());
-      return { key, label: label || key, price: parseFloat((p || "0").replace(",", ".")) || 0 };
-    });
+    const sizes_ = sizesOut;
     // Options: keep any custom options, rebuild the managed ones from the switches (classic dough is the default)
     const custom = (product?.options ?? []).filter((o) => !MANAGED_KEYS.includes(o.key));
     const managed: ProductOption[] = [];
@@ -116,7 +129,7 @@ export default function ProductEditor() {
       allergens: { fr: f.allergFr, de: f.allergDe },
       origin: { fr: f.originFr, de: f.originDe },
       ingredients,
-      sizes,
+      sizes: sizes_,
       options: [...managed, ...custom],
       customizable,
       allowed_extra_ids: customizable ? allowed : [],
@@ -132,7 +145,7 @@ export default function ProductEditor() {
     try {
       await save.mutateAsync({ id: isNew ? undefined : id, body });
       toast.show(t("saved"), "success");
-      router.back();
+      goBack();
     } catch (e: any) {
       toast.show(e.message, "error");
     }
@@ -142,7 +155,7 @@ export default function ProductEditor() {
     try {
       await del.mutateAsync(id!);
       toast.show(t("deleteProduct"), "info");
-      router.back();
+      goBack();
     } catch (e: any) {
       toast.show(e.message, "error");
     }
@@ -173,7 +186,7 @@ export default function ProductEditor() {
         <Field label={t("descDe")} value={f.descDe} onChangeText={set("descDe")} multiline testID="editor-desc-de" />
 
         <Text style={styles.section}>{t("price")}</Text>
-        <Field label={`${t("price")} (CHF)`} value={f.price} onChangeText={set("price")} keyboardType="decimal-pad" testID="editor-price" />
+        <Field label={`${t("price")} (CHF)${sizes.length ? ` · ${t("priceAutoFromSizes")}` : ""}`} value={f.price} onChangeText={set("price")} keyboardType="decimal-pad" placeholder={sizes.length ? t("automatic") : "0.00"} testID="editor-price" />
         <Field label={t("sortOrder")} value={f.sort} onChangeText={set("sort")} keyboardType="number-pad" testID="editor-sort" />
         {/* Pizza du mois / Créez votre pizza: listed first in their category; optional visibility window */}
         <Text style={styles.label}>{t("highlight")}</Text>
@@ -187,7 +200,24 @@ export default function ProductEditor() {
           <Field label={t("availableFrom")} value={f.availableFrom} onChangeText={set("availableFrom")} placeholder="2026-10-01" autoCapitalize="none" style={{ flex: 1 }} testID="editor-available-from" />
           <Field label={t("availableUntil")} value={f.availableUntil} onChangeText={set("availableUntil")} placeholder="2026-11-30" autoCapitalize="none" style={{ flex: 1 }} testID="editor-available-until" />
         </View>
-        <Field label={t("sizesList")} value={f.sizes} onChangeText={set("sizes")} multiline placeholder={"32 | 32cm | 18\n40 | 40cm | 31\n50 | 50cm | 40"} testID="editor-sizes" />
+        <Text style={styles.label}>{t("sizesList")}</Text>
+        <Text style={styles.hint}>{t("sizesHint")}</Text>
+        <View style={styles.subBox} testID="editor-sizes">
+          {sizes.length === 0 ? <Text style={styles.hint} testID="editor-sizes-empty">{t("noSizes")}</Text> : null}
+          {sizes.map((s, i) => (
+            <View key={i} style={{ flexDirection: "row", gap: 8, alignItems: "flex-end" }} testID={`editor-size-row-${i}`}>
+              <Field label={t("sizeKey")} value={s.key} onChangeText={(v) => setSize(i, { key: v })} placeholder="32" autoCapitalize="none" style={{ flex: 1 }} testID={`editor-size-key-${i}`} />
+              <Field label={t("sizeLabel")} value={s.label} onChangeText={(v) => setSize(i, { label: v })} placeholder="32cm" style={{ flex: 1.4 }} testID={`editor-size-label-${i}`} />
+              <Field label="CHF" value={s.price} onChangeText={(v) => setSize(i, { price: v })} placeholder="18.00" keyboardType="decimal-pad" style={{ flex: 1 }} testID={`editor-size-price-${i}`} />
+              <Pressable onPress={() => setSizes((p) => p.filter((_, idx) => idx !== i))} style={styles.removeBtn} testID={`editor-size-remove-${i}`}><Feather name="trash-2" size={16} color={colors.error} /></Pressable>
+            </View>
+          ))}
+          <View style={styles.wrap}>
+            {PRESET_SIZES.map((p) => <Chip key={p.key} label={`+ ${p.label}`} selected={false} onPress={() => addSize(p.key, p.label)} testID={`editor-size-preset-${p.key}`} />)}
+            <Chip label="+ Bambino 26cm" selected={false} onPress={() => addSize("26", "Bambino 26cm")} testID="editor-size-preset-26" />
+            <Chip label={t("addSize")} selected={false} onPress={() => addSize()} testID="editor-size-add" />
+          </View>
+        </View>
 
         <Text style={styles.section}>{t("ingredients")}</Text>
         <Field label={t("ingredientsList")} value={f.ingredients} onChangeText={set("ingredients")} multiline placeholder={"tomate | Tomaten\nmozzarella | Mozzarella"} testID="editor-ingredients" />
@@ -265,6 +295,7 @@ const useStyles = makeStyles((colors) => ({
   label: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "700", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.6 },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   subBox: { gap: 10, backgroundColor: colors.surfaceTertiary, borderRadius: 12, padding: 12 },
+  removeBtn: { width: 44, height: 48, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border },
   hint: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },
   link: { fontFamily: FONT_TEXT, color: colors.brandPrimary, fontWeight: "700" },
   switchRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: colors.surfaceSecondary, borderRadius: 12, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, height: 52 },

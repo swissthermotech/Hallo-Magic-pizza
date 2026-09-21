@@ -10,10 +10,11 @@ interface AuthCtx {
   ready: boolean;
   user: User | null;
   login: (phone: string, password: string) => Promise<void>;
-  register: (body: { first_name: string; last_name: string; phone: string; email?: string; password: string }) => Promise<void>;
+  register: (body: { first_name: string; last_name: string; phone: string; email?: string; password: string; marketing_consent?: boolean }) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   updateProfile: (body: { first_name: string; last_name: string; phone: string; email?: string }) => Promise<void>;
+  setMarketing: (consent: boolean) => Promise<void>;
   addAddress: (a: Omit<SavedAddress, "id">) => Promise<void>;
   updateAddress: (id: string, a: Omit<SavedAddress, "id">) => Promise<void>;
   deleteAddress: (id: string) => Promise<void>;
@@ -61,13 +62,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (user) setUser(await authApi.me());
   }, [user]);
   const updateProfile = useCallback(async (body: Parameters<AuthCtx["updateProfile"]>[0]) => setUser(await authApi.updateProfile(body)), []);
+  const setMarketing = useCallback(async (consent: boolean) => setUser(await authApi.setMarketing(consent)), []);
   const addAddress = useCallback(async (a: Omit<SavedAddress, "id">) => setUser(await authApi.addAddress(a)), []);
   const updateAddress = useCallback(async (id: string, a: Omit<SavedAddress, "id">) => setUser(await authApi.updateAddress(id, a)), []);
   const deleteAddress = useCallback(async (id: string) => setUser(await authApi.deleteAddress(id)), []);
 
   const value = useMemo<AuthCtx>(
-    () => ({ ready, user, login, register, logout, refresh, updateProfile, addAddress, updateAddress, deleteAddress }),
-    [ready, user, login, register, logout, refresh, updateProfile, addAddress, updateAddress, deleteAddress],
+    () => ({ ready, user, login, register, logout, refresh, updateProfile, setMarketing, addAddress, updateAddress, deleteAddress }),
+    [ready, user, login, register, logout, refresh, updateProfile, setMarketing, addAddress, updateAddress, deleteAddress],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
