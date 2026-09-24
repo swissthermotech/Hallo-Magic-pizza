@@ -552,8 +552,9 @@ async def seed():
     # Alcohol group for age check: existing alcoholic products (beer, wine) are fermented -> 16+
     await db.products.update_many({"is_alcohol": True, "alcohol_type": None}, {"$set": {"alcohol_type": "fermented"}})
     # Final menu structure: "Entrées" is a normal category; the virtual "Pizza sans gluten" tab is gone
-    # (gluten-free stays available as the gluten_free dough option on each pizza).
-    await db.categories.delete_many({"filter": "gluten_free"})
+    # (gluten-free stays available as the gluten_free dough option on each pizza). Non-destructive: a legacy
+    # filter category is only deactivated (hidden from the customer menu), never deleted at startup.
+    await db.categories.update_many({"filter": "gluten_free", "active": True}, {"$set": {"active": False}})
     if not await db.categories.find_one({"slug": "entrees"}):
         await db.categories.update_many({}, {"$inc": {"sort": 1}})
         await db.categories.insert_one(Category(slug="entrees", name=I18n(fr="Entrées", de="Vorspeisen"), sort=1).to_mongo())
