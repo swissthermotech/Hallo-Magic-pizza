@@ -4,7 +4,7 @@ import { useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { usePrintTicket, useTicket } from "@/src/api";
+import { BACKEND_URL, useMenu, usePrintTicket, useTicket } from "@/src/api";
 import { fmtTime } from "@/src/format";
 import QRCode from "react-native-qrcode-svg";
 import { Badge, Button, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
@@ -17,6 +17,7 @@ export default function TicketScreen() {
   const { t } = useI18n();
   const toast = useToast();
   const { data, isLoading } = useTicket(id);
+  const { data: menu } = useMenu(0); // public_url = the customer web app; the driver QR must open a real web page
   const print = usePrintTicket();
 
   const doPrint = (force: boolean) =>
@@ -33,7 +34,7 @@ export default function TicketScreen() {
             <Text style={styles.mono} testID="ticket-text">{data.text}</Text>
             {data.qr ? (
               <View style={{ alignItems: "center", gap: 6, marginTop: 6 }} testID="ticket-qr">
-                <QRCode value={`${process.env.EXPO_PUBLIC_BACKEND_URL}${data.qr}`} size={120} backgroundColor="transparent" />
+                <QRCode value={`${(menu?.settings.public_url || "").replace(/\/$/, "") || BACKEND_URL}${data.qr}`} size={120} backgroundColor="transparent" />
                 <Text style={[styles.meta, { marginTop: 0, textAlign: "center" }]}>{t("qrHint")}</Text>
               </View>
             ) : null}

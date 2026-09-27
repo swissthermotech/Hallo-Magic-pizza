@@ -8,6 +8,7 @@ import * as Haptics from "expo-haptics";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { homeFor, useStaff } from "@/src/staff-auth";
+import { BACKEND_HOST, PRODUCTION_BACKEND_URL } from "@/src/api";
 import { Button, FONT_DISPLAY, FONT_TEXT, ScreenHeader } from "@/src/components/ui";
 
 export default function StaffLogin() {
@@ -55,6 +56,10 @@ export default function StaffLogin() {
           />
           {error || lastError ? <Text style={styles.error} testID="staff-pin-error">{lastError || t("wrongPin")}</Text> : null}
           <Button title={t("unlock")} size="lg" icon="unlock" onPress={submit} disabled={pin.length < 4} testID="staff-pin-submit" />
+          {/* Which backend this device talks to – staff can see at a glance that they are on PRODUCTION */}
+          <Text style={styles.server} testID="staff-backend-host">
+            {t("server")}: {BACKEND_HOST}{`https://${BACKEND_HOST}` === PRODUCTION_BACKEND_URL ? ` · ${t("production")}` : ` · ${t("testEnvironment")}`}
+          </Text>
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -69,4 +74,5 @@ const useStyles = makeStyles((colors) => ({
   hint: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.muted, textAlign: "center", marginBottom: 10 },
   input: { height: 60, borderRadius: 16, backgroundColor: colors.surfaceSecondary, borderWidth: 1.5, borderColor: colors.border, textAlign: "center", fontFamily: FONT_TEXT, fontSize: 26, letterSpacing: 8, color: colors.onSurface },
   error: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.error, textAlign: "center", fontWeight: "700" },
+  server: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted, textAlign: "center", marginTop: 8 },
 }));

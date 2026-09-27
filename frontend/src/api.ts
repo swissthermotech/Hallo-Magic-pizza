@@ -3,12 +3,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress, CustomerProfile, CustomerSummary } from "./types";
 
-const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
+/**
+ * ONE permanent production backend for Web, Manager and the iOS/Android apps.
+ * - Dev preview (Metro, __DEV__): the preview backend from .env – a safe sandbox with its own database.
+ * - Every release / deployed bundle: the production backend, even if the build was given a preview URL.
+ */
+export const PRODUCTION_BACKEND_URL = "https://hallo-magic-test.emergent.host";
+const ENV_BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL || "").replace(/\/$/, "");
+const isPreviewHost = (u: string) => u.includes(".preview.emergentagent.com");
+export const BACKEND_URL = __DEV__
+  ? ENV_BACKEND_URL || PRODUCTION_BACKEND_URL
+  : ENV_BACKEND_URL && !isPreviewHost(ENV_BACKEND_URL) ? ENV_BACKEND_URL : PRODUCTION_BACKEND_URL;
+export const BACKEND_HOST = BACKEND_URL.replace(/^https?:\/\//, "");
+const BASE = `${BACKEND_URL}/api`;
 
 /** Product photos are stored as API-relative urls ("/api/files/..."); external urls (placeholders) pass through. */
 export function imgUri(url?: string | null): string | undefined {
   if (!url) return undefined;
-  return url.startsWith("/") ? `${process.env.EXPO_PUBLIC_BACKEND_URL}${url}` : url;
+  return url.startsWith("/") ? `${BACKEND_URL}${url}` : url;
 }
 
 // Optional customer session – set by AuthProvider; guests simply have no token.
