@@ -20,6 +20,7 @@ import photos as photos_mod
 import staff_auth as staff_mod
 import review_email as review_mod
 import customers as customers_mod
+import snapshot as snapshot_mod
 from fastapi.responses import RedirectResponse
 import hours as hours_mod
 from fastapi.security import HTTPAuthorizationCredentials
@@ -265,7 +266,9 @@ class Settings(BaseModel):
     legal_privacy: I18n = I18n(fr="", de="")
     legal_terms: I18n = I18n(fr="", de="")
     legal_imprint: I18n = I18n(fr="", de="")
-    review_delay_minutes: int = 90           # sent this long after completion  # orders created before this moment can never auto-print
+    review_delay_minutes: int = 90           # sent this long after completion
+    reviews_live_since: Optional[datetime] = None  # set automatically when real review e-mails go live (EMAIL_DRY_RUN=0):
+                                                   # only orders created AFTER this moment can ever receive a review e-mail
     temporarily_closed: bool = False
     closed_message: I18n = I18n()
     delivery_enabled: bool = True
@@ -597,6 +600,13 @@ async def seed():
     except Exception as e:  # storage unavailable -> uploads will retry lazily
         logger.warning("Object storage init failed: %s", e)
     # Google review e-mails: isolated background loop (never in the order/print request path)
+    if not review_mod.EMAIL_DRY_RUN:
+        cur = await db.settings.find_one({"_id": "main"})
+        if cur is not None and not cur.get("reviews_live_since"):
+            # Real e-mails just switched on: every order that exists right now (team tests, historical data) is
+            # excluded forever – only customers who order from this moment on receive the review request.
+            await db.settings.update_one({"_id": "main"}, {"$set": {"reviews_live_since": now_utc()}})
+            logger.info("Review e-mails LIVE – only for orders created from now on")
     asyncio.create_task(review_mod.review_loop(db, get_settings, now_utc))
     logger.info("Seed check complete")
 
@@ -2014,6 +2024,7 @@ api.include_router(auth_mod.router)
 api.include_router(staff_mod.router)
 api.include_router(auth_mod.customers_router)
 api.include_router(customers_mod.router)
+api.include_router(snapshot_mod.router)
 api.include_router(photos_mod.router)
 app.include_router(api)
 

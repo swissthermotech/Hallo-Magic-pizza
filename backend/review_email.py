@@ -154,8 +154,11 @@ async def process_due_reviews(db, settings, now) -> int:
     due = now - timedelta(minutes=max(0, int(settings.review_delay_minutes or 0)))
     q = {"status": "completed", "completed_at": {"$lte": due}, "review_status": {"$exists": False},
          "customer.email": {"$type": "string", "$ne": ""}}
-    if settings.printing_enabled_at:
-        q["created_at"] = {"$gte": settings.printing_enabled_at}  # never mail customers of development/test orders
+    if not EMAIL_DRY_RUN and not settings.reviews_live_since:
+        return 0  # real mode without a go-live moment (set at startup) – never mail historical orders
+    cutoffs = [c.replace(tzinfo=None) for c in (settings.printing_enabled_at, settings.reviews_live_since) if c]  # Mongo datetimes are naive UTC
+    if cutoffs:
+        q["created_at"] = {"$gte": max(cutoffs)}  # never mail customers of development/test/historical orders
     sent = 0
     async for o in db.orders.find(q).limit(20):
         # Atomic claim: whichever worker flips review_status first owns the send – no duplicates, ever
