@@ -65,7 +65,11 @@ export default function MoreScreen() {
           <View>
             <Text style={styles.section}>{t("contact")} & {t("openingHours")}</Text>
             <View style={[styles.card, { padding: 16, gap: 6 }]}>
-              <Text style={styles.brand}>{s.restaurant_name}</Text>
+              {/* Hidden staff access: a ~4s long-press on the name opens the PIN-protected /staff/login.
+                  Wrapped in a Pressable (reliable long-press on web + native); no onPress, so a normal tap does nothing and there is no visible hint. */}
+              <Pressable testID="more-restaurant-name" onLongPress={() => router.push("/staff/login")} delayLongPress={4000} android_disableSound unstable_pressDelay={0}>
+                <Text style={styles.brand} suppressHighlighting>{s.restaurant_name}</Text>
+              </Pressable>
               <Text style={styles.info}>{s.address}</Text>
               <Text style={styles.info}>{s.phone}</Text>
               <View style={{ height: 8 }} />
