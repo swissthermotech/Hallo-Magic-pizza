@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 18 – PIN → password migration verification (backend + frontend, PREVIEW only). Backend pytest suite (8/8) covers: legacy PIN 1234 now rejected (401), 5-failure lockout returning 429 (correct password also blocked until Mongo staff_login_attempts is cleared), weak passwords refused (400), driver role refused (400), kitchen token cannot manage passwords (403), and GET /auth/staff/roles reports credential='password' for manager/kitchen/phone. Frontend UI verified on the preview: /staff/login renders staff-password-input as HTML type=password, the staff-password-toggle switches type=password<->text correctly, staff-pin-submit stays aria-disabled=true when empty, wrong PIN 1234 shows the server message 'Mot de passe incorrect – 4 tentatives restantes'. Manager login (Preview-Manager-2026!) lands on /staff with all 5 nav buttons (kitchen/phone-orders/customers/closing/admin); each sub-screen (Cuisine, Clients, Clôture, Administration) renders without red-screen error. Admin → Sécurité shows Badge 'Mot de passe défini' for manager/kitchen/phone, no security-legacy-warning is present. security-save-phone stays aria-disabled=true with a weak password AND with a mismatching confirmation; setting phone role to Preview-Phone-2026! with matching confirmation succeeds with success toast 'Mot de passe enregistré – l'ancien code ne fonctionne plus'. Kitchen login (Preview-Cuisine-2026!) lands on /staff, has no staff-go-admin / staff-go-closing buttons, and direct navigation to /staff/admin is refused (redirects back to /staff). Phone login (Preview-Phone-2026!) lands on /phone-orders. Hidden staff access: from the Plus tab, a short tap on more-restaurant-name does nothing (stays on /more) and a ~4.5 s mouse-down hold navigates to /staff/login. Mongo staff_login_attempts collection cleared at start AND end of run – UI is not blocked. Sandbox DB verified: phone role has password_hash and no pin_hash. Manager password is unchanged (still 'Preview-Manager-2026!'). No orders/prints/emails/products were touched.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "shadow* style props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Still emitted on every screen load (already flagged in iteration 17). Not blocking."},
+      {"component": "props.pointerEvents", "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents' emitted on /staff/admin/security (Field/Button internals). Non-blocking, minor RN Web deprecation."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_security_iter18_staff_password.py",
+    "/app/test_reports/pytest/iter18_staff_pwd.xml"
+  ],
+  "action_items": [
+    "Optional: migrate remaining shadow* style props and props.pointerEvents to their non-deprecated equivalents to silence RN Web warnings (already noted in iteration 17).",
+    "No functional action items – staff PIN→password migration is working end-to-end on the preview."
+  ],
+  "critical_code_review_comments": [
+    "backend/staff_auth.py: 5-failure lockout is enforced per client + persisted in staff_login_attempts with locked_until; even the correct password returns 429 while locked. Verified.",
+    "frontend/app/staff/login.tsx uses secureTextEntry={!show} which maps to HTML input type=password on Web – confirmed via DOM inspection.",
+    "frontend/app/(tabs)/more.tsx wraps the restaurant name in a Pressable with onLongPress + delayLongPress={4000} and no onPress, so short taps are silently ignored. Confirmed behaviorally.",
+    "frontend/app/staff/admin/security.tsx client-side passwordOk mirror matches the server rule (>=10 chars, letters+digits+special, no leading/trailing whitespace); Save button aria-disabled correctly reflects both weakness and mismatch."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_security_iter18_staff_password.py (new pytest suite – file name starts with test_security_ to bypass the legacy PIN-1234 conftest autouse fixture)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% smoke on 6 flows (login page, manager, sub-screens, Sécurité screen, kitchen restriction, phone landing, hidden long-press)"},
+  "seed_data_creation": "None. Only touched: staff_login_attempts (cleared before and after). Manager, Kitchen, Phone passwords are unchanged. Phone password was re-saved to Preview-Phone-2026! (same value, no effective change; old_token invalidation applies only to the acting role which was manager, so no impact).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Sandbox staff passwords are the ones documented in /app/memory/test_credentials.md (Manager Preview-Manager-2026!, Kitchen Preview-Cuisine-2026!, Phone Preview-Phone-2026!). Legacy PINs (1234/2345/3456) are DEAD in the sandbox – every role has a password_hash and no pin_hash. If you run brute-force tests, ALWAYS clear the Mongo collection staff_login_attempts afterwards or the UI login is blocked for 15 min. Do NOT run other backend pytest suites (they auto-create/accept orders which triggers PrintNode LIVE). To bypass the autouse conftest (which still tries pin=1234), name your test module starting with 'test_security_'.",
+  "rca_of_issue": "N/A – no bug found this iteration."
+}

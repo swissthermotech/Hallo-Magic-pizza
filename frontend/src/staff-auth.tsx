@@ -12,15 +12,16 @@ interface StaffCtx {
   label: string;
   isDriver: boolean;
   driverName: string | null; // "Livreur 1" ...
-  unlock: (pin: string) => Promise<StaffRole | null>;
-  lastError: string | null; // server message of the last failed unlock (e.g. inactive driver position)
+  unlock: (password: string) => Promise<StaffRole | null>;
+  lastError: string | null; // server message of the last failed unlock (wrong password / attempts left / 15-min lockout / inactive position)
+  adoptToken: (token: string) => Promise<void>; // fresh token after the manager changed its own password
   lock: () => void;
 }
 
-const Ctx = createContext<StaffCtx>({ ready: false, unlocked: false, role: null, label: "", isDriver: false, driverName: null, unlock: async () => null, lock: () => {}, lastError: null });
+const Ctx = createContext<StaffCtx>({ ready: false, unlocked: false, role: null, label: "", isDriver: false, driverName: null, unlock: async () => null, adoptToken: async () => {}, lock: () => {}, lastError: null });
 
-/** Server-side staff authentication: the PIN is verified by the backend (Argon2 hashes), which returns a role JWT.
- * Nothing secret lives in the frontend. Roles: manager, kitchen, phone, driver1..3. */
+/** Server-side staff authentication: the password (or driver shift code) is verified by the backend (Argon2 hashes),
+ * which returns a role JWT that expires with the working day. Brute force is throttled server-side. Nothing secret lives in the frontend. */
 export function StaffProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [session, setSession] = useState<{ token: string; role: StaffRole; label: string } | null>(null);
@@ -43,9 +44,9 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const unlock = useCallback(async (pin: string) => {
+  const unlock = useCallback(async (password: string) => {
     try {
-      const r = await api.post<{ access_token: string; role: StaffRole; label: string }>("/auth/staff/login", { pin: pin.trim() });
+      const r = await api.post<{ access_token: string; role: StaffRole; label: string }>("/auth/staff/login", { password: password.trim() });
       setStaffToken(r.access_token);
       const s = { token: r.access_token, role: r.role, label: r.label };
       setSession(s);
@@ -53,9 +54,18 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
       setLastError(null);
       return r.role;
     } catch (e: any) {
-      setLastError(e?.status === 403 ? e.message : null);
+      // 401 (wrong password, attempts left), 429 (blocked 15 min), 403 (inactive position): show the server's reason
+      setLastError(e?.message || null);
       return null;
     }
+  }, []);
+  const adoptToken = useCallback(async (token: string) => {
+    setStaffToken(token);
+    setSession((s) => {
+      const next = s ? { ...s, token } : s;
+      if (next) storage.secureSet(KEY, JSON.stringify(next));
+      return next;
+    });
   }, []);
   const lock = useCallback(() => {
     setSession(null);
@@ -76,8 +86,8 @@ export function StaffProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<StaffCtx>(() => {
     const role = session?.role ?? null;
     const isDriver = !!role && role.startsWith("driver");
-    return { ready, unlocked: !!session, role, label: session?.label ?? "", isDriver, driverName: isDriver ? `Livreur ${role!.slice(-1)}` : null, unlock, lock, lastError };
-  }, [ready, session, unlock, lock, lastError]);
+    return { ready, unlocked: !!session, role, label: session?.label ?? "", isDriver, driverName: isDriver ? `Livreur ${role!.slice(-1)}` : null, unlock, adoptToken, lock, lastError };
+  }, [ready, session, unlock, adoptToken, lock, lastError]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

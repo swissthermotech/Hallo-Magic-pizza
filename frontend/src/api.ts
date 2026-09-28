@@ -481,10 +481,10 @@ export function useSaveClosing() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["closing"] }),
   });
 }
-export const staffPins = {
-  roles: () => api.get<{ role: string; label: string; active: boolean }[]>("/auth/staff/roles"),
-  change: (role: string, pin: string) => api.put("/auth/staff/pins", { role, pin }),
-  setActive: (role: string, active: boolean) => api.put<{ role: string; active: boolean }>(`/auth/staff/drivers/${role}/active`, { active }),
+export const staffCredentials = {
+  roles: () => api.get<{ role: string; label: string; active: boolean; credential: "password" | "pin" | "none" }[]>("/auth/staff/roles"),
+  /** Manager sets a role's password (>= 10 chars, letters + digits + special; verified server-side). Returns a fresh token when the manager changes its own password. */
+  setPassword: (role: string, password: string) => api.put<{ ok: boolean; role: string; access_token?: string }>("/auth/staff/password", { role, password }),
 };
 
 // ---- Ordering hours / first delivery ----
