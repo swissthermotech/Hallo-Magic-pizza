@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
+import { File as FSFile, UploadType } from "expo-file-system";
 import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress, CustomerProfile, CustomerSummary } from "./types";
 
 /**
@@ -433,15 +434,20 @@ async function prepareUpload(uri: string, width?: number, height?: number): Prom
 export async function uploadProductPhoto(uri: string, name = "photo.jpg", type = "image/jpeg", width?: number, height?: number): Promise<{ url: string; path: string; size: number }> {
   const prepared = await prepareUpload(uri, width, height);
   const fileName = name.replace(/\.[a-z0-9]+$/i, "") + ".jpg";
-  const form = new FormData();
-  if (Platform.OS === "web") {
-    form.append("file", prepared.blob!, fileName);
-  } else {
-    form.append("file", { uri: prepared.uri, name: fileName, type: prepared.uri !== uri ? "image/jpeg" : type } as any);
-  }
+  const mimeType = prepared.uri !== uri ? "image/jpeg" : type;
+  const url = `${BASE}/uploads/product-photo`;
   let res: Response;
   try {
-    res = await fetch(`${BASE}/uploads/product-photo`, { method: "POST", body: form, headers: authHeaders() });
+    if (Platform.OS === "web") {
+      const form = new FormData();
+      form.append("file", prepared.blob!, fileName);
+      res = await fetch(url, { method: "POST", body: form, headers: authHeaders() });
+    } else {
+      // Native: Expo's standards-based fetch (SDK 54+) rejects React Native's legacy `{ uri, name, type }` multipart
+      // part ("Unsupported FormDataPart implementation") -> stream the file with expo-file-system's native uploader.
+      const r = await new FSFile(prepared.uri).upload(url, { httpMethod: "POST", uploadType: UploadType.MULTIPART, fieldName: "file", mimeType, headers: authHeaders() });
+      res = new Response(r.body, { status: r.status, headers: r.headers });
+    }
   } catch (e: any) {
     throw new ApiError(0, `Connexion impossible pendant l'envoi de la photo (${e?.message || "réseau"})`);
   }
