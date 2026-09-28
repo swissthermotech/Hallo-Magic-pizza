@@ -29,7 +29,10 @@
     "web": {
       "bundler": "metro",
       "output": "single",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Hallo Magic Pizza",
+      "lang": "fr",
+      "description": "Hallo Magic Pizza – commande en ligne, retrait et livraison (Marly / Fribourg)"
     },
     "plugins": [
       "expo-router",
