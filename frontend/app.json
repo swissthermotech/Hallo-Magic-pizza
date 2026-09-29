@@ -11,7 +11,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.hallomagictest.jectz0",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Choose product photos for the menu"
+        "NSPhotoLibraryUsageDescription": "Choose product photos for the menu",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false
+        }
       },
       "config": {
         "usesNonExemptEncryption": false
