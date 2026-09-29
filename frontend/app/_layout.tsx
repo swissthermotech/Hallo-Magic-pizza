@@ -22,13 +22,14 @@ LogBox.ignoreAllLogs(true);
 
 export default function RootLayout() {
   // Prewarm icon + brand fonts so glyphs render on first paint (Expo Go Android fix).
-  const [fontsLoaded] = useFonts({
+  // Never block the app on a font failure (e.g. an asset missing on the web host): fall back to system fonts.
+  const [fontsLoaded, fontError] = useFonts({
     PlayfairDisplay: require("../assets/fonts/PlayfairDisplay.ttf"),
     DMSans: require("../assets/fonts/DMSans.ttf"),
     Feather: require("@react-native-vector-icons/feather/fonts/Feather.ttf"),
   });
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded && !fontError) {
     return (
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: themes.light.surface }}>
         <ActivityIndicator color={themes.light.brandPrimary} />

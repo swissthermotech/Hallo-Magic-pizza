@@ -7,6 +7,8 @@
 # Dependencies
 node_modules/
 /node_modules
+# Expo web export served by the backend: its vendor assets live under a folder literally named node_modules
+!backend/webapp/assets/node_modules/
 /.pnp
 .pnp.js
 .yarn/install-state.gz
