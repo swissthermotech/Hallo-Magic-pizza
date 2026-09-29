@@ -12,8 +12,16 @@ import { Badge, Button, Field, FONT_TEXT, ScreenHeader, useToast } from "@/src/c
 
 type RoleRow = { role: string; label: string; active: boolean; credential: "password" | "pin" | "none" };
 
-/** Client-side mirror of the server rule (the server is authoritative): >= 10 chars, letters + digits + special character. */
-const passwordOk = (p: string) => p.length >= 10 && p.length <= 128 && /[A-Za-z]/.test(p) && /[0-9]/.test(p) && /[^A-Za-z0-9\s]/.test(p) && p === p.trim();
+/** Client-side mirror of the server rules (the server is authoritative). Each rule is shown live under the fields so the
+ * user always sees WHY a password is not accepted; the Save button is only disabled while a field is still empty. */
+const RULES: { key: "ruleLength" | "ruleLetter" | "ruleDigit" | "ruleSpecial" | "ruleNoSpaces"; test: (p: string) => boolean }[] = [
+  { key: "ruleLength", test: (p) => p.length >= 10 && p.length <= 128 },
+  { key: "ruleLetter", test: (p) => /[A-Za-z]/.test(p) },
+  { key: "ruleDigit", test: (p) => /[0-9]/.test(p) },
+  { key: "ruleSpecial", test: (p) => /[^A-Za-z0-9\s]/.test(p) },
+  { key: "ruleNoSpaces", test: (p) => p === p.trim() },
+];
+const failingRule = (p: string) => RULES.find((r) => !r.test(p))?.key ?? null;
 
 /** Manager only: set the password of each staff role (verified & stored hashed on the server; legacy PINs are replaced). */
 export default function SecurityScreen() {
@@ -35,8 +43,9 @@ export default function SecurityScreen() {
 
   const save = async (role: string) => {
     const password = pw[role] || "";
-    if (!passwordOk(password)) {
-      toast.show(t("passwordRules"), "error");
+    const failing = failingRule(password);
+    if (failing) {
+      toast.show(`${t(failing)} – ${t("passwordRules")}`, "error");
       return;
     }
     if (password !== (confirm[role] || "")) {
@@ -87,8 +96,25 @@ export default function SecurityScreen() {
             </View>
             <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-end" }}>
               <Field label={t("confirmPassword")} value={confirm[r.role] || ""} onChangeText={(v) => setConfirm((p) => ({ ...p, [r.role]: v }))} secureTextEntry={!show[r.role]} autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="off" importantForAutofill="no" maxLength={128} style={{ flex: 1 }} testID={`security-confirm-${r.role}`} />
-              <Button title={t("save")} icon="key" loading={busy === r.role} disabled={!passwordOk(pw[r.role] || "") || (pw[r.role] || "") !== (confirm[r.role] || "")} onPress={() => save(r.role)} testID={`security-save-${r.role}`} />
+              <Button title={t("save")} icon="key" loading={busy === r.role} disabled={!(pw[r.role] || "").length || !(confirm[r.role] || "").length} onPress={() => save(r.role)} testID={`security-save-${r.role}`} />
             </View>
+            {(pw[r.role] || "").length ? (
+              <View style={styles.checks} testID={`security-checks-${r.role}`}>
+                {RULES.map((rule) => {
+                  const ok = rule.test(pw[r.role] || "");
+                  return (
+                    <View key={rule.key} style={styles.check}>
+                      <Feather name={ok ? "check-circle" : "x-circle"} size={14} color={ok ? colors.success : colors.error} />
+                      <Text style={[styles.checkText, !ok && { color: colors.error }]}>{t(rule.key)}</Text>
+                    </View>
+                  );
+                })}
+                <View style={styles.check}>
+                  <Feather name={(pw[r.role] || "") === (confirm[r.role] || "") ? "check-circle" : "x-circle"} size={14} color={(pw[r.role] || "") === (confirm[r.role] || "") ? colors.success : colors.error} />
+                  <Text style={[styles.checkText, (pw[r.role] || "") !== (confirm[r.role] || "") && { color: colors.error }]}>{t("ruleMatch")}</Text>
+                </View>
+              </View>
+            ) : null}
           </View>
         ))}
         <Text style={styles.hint}>{t("passwordChangeHint")}</Text>
@@ -106,4 +132,7 @@ const useStyles = makeStyles((colors) => ({
   warn: { flexDirection: "row", gap: 10, alignItems: "center", backgroundColor: colors.warningSoft, borderRadius: 14, padding: 12 },
   warnText: { flex: 1, fontFamily: FONT_TEXT, fontSize: 13, fontWeight: "700", color: colors.onSurface },
   eye: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 24, backgroundColor: colors.surfaceTertiary },
+  checks: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 },
+  check: { flexDirection: "row", alignItems: "center", gap: 4 },
+  checkText: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.muted },
 }));
