@@ -2028,6 +2028,26 @@ api.include_router(snapshot_mod.router)
 api.include_router(photos_mod.router)
 app.include_router(api)
 
+# ---- Web frontend (Manager / Cuisine / Téléphone / Livreur + customer site) served by the same deployment -------------
+# `webapp/` is the Expo web export of ./frontend (`npx expo export --platform web`). Serving it from the production
+# backend gives ONE stable URL (https://<backend>/staff/login) that talks to this very backend/database – no second
+# frontend deployment, no second database. `/api/*` keeps priority; every other path falls back to the SPA index.
+WEBAPP_DIR = Path(__file__).parent / "webapp"
+if (WEBAPP_DIR / "index.html").is_file():
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/_expo", StaticFiles(directory=WEBAPP_DIR / "_expo"), name="webapp-bundles")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def webapp_spa(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = (WEBAPP_DIR / full_path).resolve() if full_path else None
+        if candidate and candidate.is_file() and WEBAPP_DIR.resolve() in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(WEBAPP_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
