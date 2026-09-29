@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Modal, Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -7,7 +7,7 @@ import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { statusLabel, useI18n } from "@/src/i18n";
 import { useAuth } from "@/src/auth";
-import { useMyAccountOrders } from "@/src/api";
+import { authApi, useMyAccountOrders } from "@/src/api";
 import { chf, fmtTime, statusTone } from "@/src/format";
 import { Badge, Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
 
@@ -185,13 +185,75 @@ function Profile() {
       </View>
 
       <Button title={t("logout")} variant="outline" icon="log-out" onPress={() => logout().then(() => router.back())} testID="auth-logout" />
+      <DeleteAccount onDeleted={() => logout().then(() => router.back())} />
     </KeyboardAwareScrollView>
+  );
+}
+
+/** App Store 5.1.1(v) / nFADP: in-app account deletion. Re-authenticates with the password; the server anonymises the
+ * customer's orders (history & totals kept) and deletes the account, which invalidates every session of this customer. */
+function DeleteAccount({ onDeleted }: { onDeleted: () => Promise<void> }) {
+  const styles = useStyles();
+  const { colors } = useTheme();
+  const { t } = useI18n();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const close = () => {
+    if (busy) return;
+    setOpen(false);
+    setPassword("");
+  };
+  const confirm = async () => {
+    if (!password || busy) return;
+    setBusy(true);
+    try {
+      await authApi.deleteAccount(password);
+      setOpen(false);
+      setPassword("");
+      toast.show(t("accountDeleted"), "success");
+      await onDeleted();
+    } catch (e: any) {
+      toast.show(e?.message || t("retry"), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <Pressable onPress={() => setOpen(true)} style={styles.deleteLink} accessibilityRole="button" testID="account-delete-open">
+        <Feather name="trash-2" size={16} color={colors.error} />
+        <Text style={styles.deleteLinkText}>{t("deleteAccount")}</Text>
+      </Pressable>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={close}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard} testID="account-delete-modal">
+            <Text style={styles.modalTitle}>{t("deleteAccountTitle")}</Text>
+            <Text style={styles.modalText}>{t("deleteAccountText")}</Text>
+            <Field label={t("password")} value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="off" importantForAutofill="no" testID="account-delete-password" />
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <Button title={t("close")} variant="outline" onPress={close} disabled={busy} style={{ flex: 1 }} testID="account-delete-cancel" />
+              <Button title={t("deleteAccountConfirm")} variant="danger" icon="trash-2" onPress={confirm} loading={busy} disabled={!password} style={{ flex: 1 }} testID="account-delete-confirm" />
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
   );
 }
 
 const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
   center: { alignItems: "center", justifyContent: "center" },
+  deleteLink: { flexDirection: "row", alignSelf: "center", alignItems: "center", gap: 6, minHeight: 44, paddingHorizontal: 12, marginTop: 4 },
+  deleteLinkText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "700", color: colors.error, textDecorationLine: "underline" },
+  modalBackdrop: { flex: 1, backgroundColor: colors.scrim, alignItems: "center", justifyContent: "center", padding: 24 },
+  modalCard: { width: "100%", maxWidth: 420, backgroundColor: colors.surface, borderRadius: 20, padding: 20, gap: 14 },
+  modalTitle: { fontFamily: FONT_DISPLAY, fontSize: 22, color: colors.onSurface },
+  modalText: { fontFamily: FONT_TEXT, fontSize: 14, lineHeight: 20, color: colors.onSurfaceSecondary },
   segment: { flexDirection: "row", backgroundColor: colors.surfaceTertiary, borderRadius: 14, padding: 4, gap: 4 },
   segBtn: { flex: 1, height: 44, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   segBtnActive: { backgroundColor: colors.surfaceInverse },

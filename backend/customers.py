@@ -24,7 +24,7 @@ from database import db
 router = APIRouter(prefix="/customers")
 
 ORDER_PROJECTION = {"order_number": 1, "type": 1, "source": 1, "station": 1, "status": 1, "total": 1, "created_at": 1,
-                    "customer": 1, "address": 1, "user_id": 1, "marketing_consent": 1}
+                    "customer": 1, "address": 1, "user_id": 1, "marketing_consent": 1, "anonymised_at": 1}
 NOT_SPENT = {"cancelled", "rejected"}
 
 
@@ -98,6 +98,10 @@ async def build_profiles() -> Dict[str, dict]:
         cust = o.get("customer") or {}
         d = normalize_phone(cust.get("phone", ""))
         key = o.get("user_id") if o.get("user_id") in profiles else by_phone.get(d)
+        if o.get("anonymised_at"):
+            key = "anonymised"  # erased accounts: one aggregate row, no personal data left to show
+            if key not in profiles:
+                profiles[key] = _profile(key, "Clients supprimés", "", "", None, "guest", o.get("created_at"))
         if not key:
             key = f"guest:{d or str(o['_id'])}"
             if key not in profiles:

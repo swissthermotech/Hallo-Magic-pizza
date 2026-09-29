@@ -86,7 +86,7 @@ export const api = {
   post: <T>(p: string, body?: unknown) => request<T>(p, { method: "POST", body: JSON.stringify(body ?? {}) }),
   put: <T>(p: string, body: unknown) => request<T>(p, { method: "PUT", body: JSON.stringify(body) }),
   patch: <T>(p: string, body: unknown) => request<T>(p, { method: "PATCH", body: JSON.stringify(body) }),
-  del: <T>(p: string) => request<T>(p, { method: "DELETE" }),
+  del: <T>(p: string, body?: unknown) => request<T>(p, { method: "DELETE", ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }),
 };
 
 export const SOURCE = Platform.select({ ios: "ios", android: "android", default: "web" }) as string;
@@ -299,6 +299,8 @@ export const authApi = {
   addAddress: (body: Omit<SavedAddress, "id">) => api.post<User>("/auth/me/addresses", body),
   updateAddress: (id: string, body: Omit<SavedAddress, "id">) => api.put<User>(`/auth/me/addresses/${id}`, body),
   deleteAddress: (id: string) => api.del<User>(`/auth/me/addresses/${id}`),
+  /** Right to erasure: re-authenticates with the password, anonymises the customer's orders and deletes the account. */
+  deleteAccount: (password: string) => api.del<{ ok: boolean; anonymised_orders: number }>("/auth/me", { password }),
 };
 
 export function useMyAccountOrders(enabled: boolean) {

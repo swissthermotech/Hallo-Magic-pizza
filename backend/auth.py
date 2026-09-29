@@ -192,6 +192,55 @@ async def me(user=Depends(current_user)):
     return await user_out_full(user)
 
 
+class DeleteMeIn(BaseModel):
+    password: str = Field(min_length=1, max_length=128)
+
+
+ACTIVE_ORDER_STATUSES = ["pending", "accepted", "preparing", "ready", "assigned", "delivering", "picked_up", "delivered"]
+ANONYMISED_NAME = "Client supprimé"
+
+
+@router.delete("/me")
+async def delete_me(body: DeleteMeIn, user=Depends(current_user)):
+    """Customer right to erasure (App Store 5.1.1(v) / nFADP): the customer re-enters the password, then
+    1. every order of this person (linked by account id or by the account phone number) keeps its number, items, totals,
+       statuses and timestamps but loses name / phone / e-mail / street / instructions (statistics + history stay intact);
+    2. the ticket copies stored in print_jobs for those orders are redacted;
+    3. the marketing-consent record of the phone number is removed;
+    4. the account document is deleted -> every JWT of this customer is rejected from now on (current_user looks the
+       user up on each request), so no server-side token store is needed.
+    Refused while an order is still in progress (staff and drivers need the contact data to fulfil it)."""
+    try:
+        ok = password_hash.verify(body.password, user["password_hash"])
+    except Exception:
+        ok = False
+    if not ok:
+        raise HTTPException(403, "Mot de passe incorrect")
+    uid = str(user["_id"])
+    digits = normalize_phone(user.get("phone", ""))
+    scope = {"$or": [{"user_id": uid}] + ([{"customer.phone": {"$regex": re.escape(digits[-9:]) + "$"}}] if len(digits) >= 9 else [])}
+    active = await db.orders.count_documents({**scope, "status": {"$in": ACTIVE_ORDER_STATUSES}})
+    if active:
+        raise HTTPException(409, "Une commande est encore en cours – la suppression sera possible une fois la commande terminée")
+    now = datetime.now(timezone.utc)
+    order_ids = [o["_id"] async for o in db.orders.find(scope, {"_id": 1})]
+    if order_ids:
+        await db.orders.update_many(
+            {"_id": {"$in": order_ids}},
+            {"$set": {"customer.first_name": ANONYMISED_NAME, "customer.last_name": "", "customer.phone": "", "customer.email": None,
+                      "general_note": None, "anonymised_at": now},
+             "$unset": {"user_id": "", "marketing_consent": ""}})
+        # delivery orders: keep NPA/city (zone statistics), drop street/number/instructions (ticket layout still renders)
+        await db.orders.update_many({"_id": {"$in": order_ids}, "address": {"$type": "object"}},
+                                    {"$set": {"address.street": "", "address.number": "", "address.instructions": None}})
+        await db.print_jobs.update_many({"order_id": {"$in": [str(i) for i in order_ids]}},
+                                        {"$set": {"content": "[contenu supprimé – compte client effacé]", "redacted_at": now}})
+    if digits:
+        await db.marketing_consents.delete_one({"phone": digits})
+    await db.users.delete_one({"_id": user["_id"]})
+    return {"ok": True, "anonymised_orders": len(order_ids)}
+
+
 @router.put("/me", response_model=UserOut)
 async def update_me(body: ProfileIn, user=Depends(current_user)):
     phone = normalize_phone(body.phone)

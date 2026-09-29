@@ -11,8 +11,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.hallomagictest.jectz0",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Choose product photos for the menu",
-        "NSCameraUsageDescription": "Take product photos for the menu"
+        "NSPhotoLibraryUsageDescription": "Choose product photos for the menu"
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
@@ -47,16 +49,29 @@
       ],
       "expo-font",
       "expo-image",
-      "expo-secure-store",
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
       "expo-web-browser",
       "expo-status-bar",
       "@react-native-vector-icons/feather",
-      "expo-audio",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
       [
         "expo-image-picker",
         {
           "photosPermission": "Choose product photos for the menu",
-          "cameraPermission": "Take product photos for the menu"
+          "cameraPermission": false,
+          "microphonePermission": false
         }
       ]
     ],
