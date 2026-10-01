@@ -11,6 +11,7 @@ import os
 import asyncio
 import re
 import logging
+import textwrap
 from pathlib import Path
 
 from seed_data import CATEGORIES, EXTRAS, PRODUCTS, DEFAULT_SETTINGS
@@ -1768,17 +1769,16 @@ def escpos_big(text: str, scale: int = 3, w: Optional[int] = None, h: Optional[i
     return f"\x1ba\x01\x1bE\x01{rev_on}\x1d!{chr(n)}{text}\x1d!\x00{rev_off}\x1bE\x00\x1ba\x00"
 
 
-def escpos_item(qty_size: str, name: str) -> List[str]:
-    """Pizza line, always BOLD and on ONE line whenever it fits the 80 mm paper:
-    - ≤ 21 chars → 2× width + height ('1x 50 CM FORESTIÈRE')
-    - ≤ 42 chars → double height, normal width ('1x 50 CM QUATTRO FORMAGGI SPECIALE')
-    - longer      → '1x 50 CM' (2×) then the name on the next double-height line (printer wraps beyond 42 cols)."""
-    full = f"{qty_size} {name}".strip()
-    if len(full) <= 21:
-        return [f"\x1bE\x01\x1d!\x11{full}{ESC_RESET}"]
-    if len(full) <= 42:
-        return [f"\x1bE\x01\x1d!\x01{full}{ESC_RESET}"]
-    return [f"\x1bE\x01\x1d!\x11{qty_size}{ESC_RESET}", f"\x1bE\x01\x1d!\x01 {name}{ESC_RESET}"]
+ITEM_COLS = 21  # 80 mm paper (42 cols font A) holds 21 characters at 2× width
+
+
+def escpos_item(text: str) -> List[str]:
+    """Any pizza-related ticket line (name, supplement, removed ingredient, note): BOLD, 2× width + 2× height,
+    left-aligned – exactly like '1x 32 CM BURRATA'. Too long for the paper → word-wrapped at 21 columns, every
+    continuation line printed in the very same style, indented under the text of the first line."""
+    indent = text[: len(text) - len(text.lstrip())]
+    chunks = textwrap.wrap(text, ITEM_COLS, subsequent_indent=indent + "  ") or [text]
+    return [f"\x1bE\x01\x1d!\x11{chunk}{ESC_RESET}" for chunk in chunks]
 
 
 def strip_escpos(text: str) -> str:
@@ -1851,36 +1851,37 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
         lines += [tall("DEJA PAYE")]
     else:
         lines += [tall(f"À ENCAISSER · {'TERMINAL' if method == 'terminal' else 'ESPÈCES'} · {amount}")]  # one bold line
-    # ---- 4. ITEMS – "1x 50 CM  NOM" whole line bold 2x (one line when it fits); supplements smaller, indented -----
+    # ---- 4. ITEMS – every pizza-related line (name, supplements, removed ingredients, notes) in the SAME bold 2x style,
+    #      word-wrapped on the next line(s) when too long for the 80 mm paper ---------------------------------------
     def size_txt(it):
         return it["size"]["label"].upper().replace("CM", "").strip() + " CM" if it.get("size") else ""
     def item_line(it, name):
-        return escpos_item(f"{it['quantity']}x {size_txt(it)}".strip(), name)
+        return escpos_item(" ".join(p for p in (f"{it['quantity']}x", size_txt(it), name) if p))
     lines += ["-" * W]
     for it in o["items"]:
         if it.get("half"):
             lines += item_line(it, "MOITIE / MOITIE")
-            lines.append(f"   1/2 {it['name']['fr'].upper()}")
+            lines += escpos_item(f"   1/2 {it['name']['fr'].upper()}")
             for r in it.get("removed_ingredients", []):
-                lines.append(f"       - SANS {r['fr'].upper()}")
+                lines += escpos_item(f"       - SANS {r['fr'].upper()}")
             if it.get("note"):
-                lines.append(f"       NOTE: {it['note'].upper()}")
-            lines.append(f"   1/2 {it['half']['name']['fr'].upper()}")
+                lines += escpos_item(f"       NOTE: {it['note'].upper()}")
+            lines += escpos_item(f"   1/2 {it['half']['name']['fr'].upper()}")
             for r in it["half"].get("removed_ingredients", []):
-                lines.append(f"       - SANS {r['fr'].upper()}")
+                lines += escpos_item(f"       - SANS {r['fr'].upper()}")
             if it["half"].get("note"):
-                lines.append(f"       NOTE: {it['half']['note'].upper()}")
+                lines += escpos_item(f"       NOTE: {it['half']['note'].upper()}")
         else:
             lines += item_line(it, it["name"]["fr"].upper())
             for op in it.get("options", []):
-                lines.append(f"   * {op['name']['fr'].upper()}")
+                lines += escpos_item(f"   * {op['name']['fr'].upper()}")
             for r in it.get("removed_ingredients", []):
-                lines.append(f"   - SANS {r['fr'].upper()}")
+                lines += escpos_item(f"   - SANS {r['fr'].upper()}")
         for e in it.get("extras", []):
             q = f"{e['quantity']}x " if e["quantity"] > 1 else ""
-            lines.append(f"   + {q}{e['name']['fr'].upper()}")
+            lines += escpos_item(f"   + {q}{e['name']['fr'].upper()}")
         if not it.get("half") and it.get("note"):
-            lines.append(f"   NOTE: {it['note'].upper()}")
+            lines += escpos_item(f"   NOTE: {it['note'].upper()}")
         lines.append("")
     if o.get("general_note"):
         lines += ["NOTE COMMANDE:", o["general_note"].upper(), ""]
