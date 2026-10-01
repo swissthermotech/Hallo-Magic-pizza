@@ -2055,3 +2055,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def api_reads_are_never_cached(request: Request, call_next):
+    """Live data (order status polled by customers, staff dashboards) must never be served from a browser/proxy cache.
+    Uploaded files keep their own immutable cache header."""
+    response = await call_next(request)
+    if request.method == "GET" and request.url.path.startswith("/api/") and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "no-store"
+    return response

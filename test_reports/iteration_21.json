@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 21 — Cache-busting fix verified on preview sandbox. Backend: new middleware `api_reads_are_never_cached` sets `Cache-Control: no-store` on all GET /api/* responses while preserving `public, max-age=31536000, immutable` for /api/files/<existing> (verified against local backend). All 5 cache-header pytest tests pass. Frontend: order page live-updates from pending → accepted WITHOUT reload within ~5s after the DB flip; `order-eta-time` renders the ETA (12:47) and the tracker shows `Acceptée`. Polling cadence /api/orders/{id} ~4s confirmed. Regression: home menu loads (home-title + 20 product cards), /staff/login shows staff-backend-host text, no console errors from api layer. Order 6ab911a41640440ce55631b1 was snapshotted and restored to its original status=completed. One minor RN console warning observed (shadow* deprecated → use boxShadow), unrelated to this fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/files/<existing>", "issue": "Preview edge proxy (Cloudflare) rewrites our `public, max-age=31536000, immutable` to `no-store, no-cache, must-revalidate` on egress. Backend itself serves the correct immutable header (verified via http://localhost:8001). Production domain not affected by this test. No code change required."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "styles with shadow* props", "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Pre-existing in the codebase (not from this fix). Reference: run `grep -rn \"shadow[A-Z]\" /app/frontend/src` to locate."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_cache_headers.py",
+    "/app/test_reports/pytest/iter21_cache.xml",
+    "/app/test_reports/mongo_order_toggle.py"
+  ],
+  "action_items": [
+    "(Optional, pre-existing) Migrate remaining `shadowColor/shadowOffset/shadowOpacity/shadowRadius` RN styles to `boxShadow` to silence deprecation warning."
+  ],
+  "critical_code_review_comments": [
+    "server.py L2060-2067: middleware correctly uses `if \"cache-control\" not in response.headers` so files with their own immutable header are preserved — good.",
+    "api.ts L52-59: `cache: 'no-store'` applied on web for GET only; non-GET and native platforms unchanged — correct scope."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_cache_headers.py (new)",
+    "/app/test_reports/mongo_order_toggle.py (new helper – snapshot/pending/accept/restore)"
+  ],
+  "success_rate": {"backend": "100% (5/5 pytest)", "frontend": "100% (pending→accepted live update, regression OK)"},
+  "seed_data_creation": "None. Order 6ab911a41640440ce55631b1 was snapshotted to /tmp/order_6ab911a41640440ce55631b1.bson.json and restored to original status=completed (status_history len=6) after the test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview edge proxy appends `no-cache, must-revalidate` to every response. To verify backend immutable headers on /api/files, hit http://localhost:8001 directly. Mongo helper at /app/test_reports/mongo_order_toggle.py exposes snapshot/pending/accept/restore for the fixed order id used in the regression.",
+  "rca_of_issue": "Bug (iteration 31) was: after the restaurant accepts an order, the customer order page did not update because web browsers (iOS Safari in particular) were serving the polled GET /api/orders/{id} responses from the HTTP cache. Fix: (1) FastAPI middleware forces `Cache-Control: no-store` on every GET /api/* read while leaving the explicit `immutable` header on /api/files/*; (2) frontend request() passes `cache: 'no-store'` on web for GET requests. Verified end-to-end on the preview sandbox: a DB-level flip from pending to accepted reflected in the UI within ~5s with no reload."
+}

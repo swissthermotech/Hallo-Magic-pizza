@@ -52,6 +52,9 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
+    // Web browsers (notably iOS Safari) may serve repeated GETs from their HTTP cache, which freezes the live order
+    // status while the customer waits for the restaurant to accept -> always bypass the cache for polling reads.
+    ...(Platform.OS === "web" && (!init?.method || init.method === "GET") ? { cache: "no-store" as RequestCache } : {}),
     headers: { "Content-Type": "application/json", ...authHeaders(path), ...(init?.headers || {}) },
   });
   if (!res.ok) {
