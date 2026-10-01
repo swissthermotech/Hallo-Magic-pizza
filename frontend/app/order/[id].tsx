@@ -1,5 +1,5 @@
-import React from "react";
-import { ActivityIndicator, ScrollView, Text, View } from "react-native";
+import React, { useEffect } from "react";
+import { ActivityIndicator, AppState, ScrollView, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@react-native-vector-icons/feather";
@@ -19,7 +19,19 @@ export default function OrderScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { t, lang } = useI18n();
-  const { data: o, isLoading } = useOrder(id);
+  const { data: o, isLoading, refetch } = useOrder(id, 0);
+
+  // The customer usually keeps THIS screen open (phone locked / app or Safari tab in the background) while the
+  // restaurant decides. A poll interrupted by the OS can stay "in flight" forever and the default interval then
+  // silently re-uses that stuck request -> the status never moves past "En attente". So: poll with cancelRefetch
+  // (any stuck request is dropped and a fresh one started) and refresh immediately when the app becomes active again.
+  useEffect(() => {
+    if (!id) return;
+    const poll = () => { refetch({ cancelRefetch: true }).catch(() => {}); };
+    const timer = setInterval(poll, 5000);
+    const sub = AppState.addEventListener("change", (state) => { if (state === "active") poll(); });
+    return () => { clearInterval(timer); sub.remove(); };
+  }, [id, refetch]);
 
   if (isLoading || !o) {
     return (
