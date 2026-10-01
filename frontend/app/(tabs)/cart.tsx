@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useContext, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BottomTabBarHeightContext } from "expo-router/tabs";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
@@ -22,6 +23,14 @@ export default function CartScreen() {
   const { data } = useMenu();
   const settings = data?.settings;
   const goods = cart.subtotal + cart.extrasTotal;
+  // Classic tab bar (Android, iOS < 26, web): the screen is laid out ABOVE an opaque bar -> no extra offset needed.
+  // iOS 26 native tabs float OVER the content: this screen's bottom safe-area inset then includes the tab bar, so
+  // the checkout CTA (and the scroll content) must be lifted by it to stay fully visible and tappable. Native tabs
+  // pre-render the screens and report the full inset slightly later -> keep the largest value seen (no jumping back).
+  const classicTabBar = useContext(BottomTabBarHeightContext) !== undefined;
+  const maxBottomInset = useRef(0);
+  maxBottomInset.current = Math.max(maxBottomInset.current, insets.bottom);
+  const bottomInset = classicTabBar ? 0 : maxBottomInset.current;
 
   return (
     <View style={styles.screen}>
@@ -34,7 +43,7 @@ export default function CartScreen() {
         <Empty icon="shopping-bag" title={t("emptyCart")} hint={t("emptyCartHint")} action={<Button title={t("browseMenu")} onPress={() => router.push("/(tabs)")} testID="cart-browse-menu-button" />} />
       ) : (
         <>
-          <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 200, width: "100%", maxWidth: 760, alignSelf: "center" }} bottomOffset={220} showsVerticalScrollIndicator={false}>
+          <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: 200 + bottomInset, width: "100%", maxWidth: 760, alignSelf: "center" }} bottomOffset={220 + bottomInset} showsVerticalScrollIndicator={false}>
             {cart.items.map((it) => (
               <View key={it.line_id} style={styles.item} testID={`cart-item-${it.line_id}`}>
                 <Image source={{ uri: imgUri(it.image_url) }} style={styles.img} contentFit="cover" />
@@ -87,7 +96,7 @@ export default function CartScreen() {
             </View>
           </KeyboardAwareScrollView>
 
-          <View style={[styles.cta, { paddingBottom: 16 }]}>
+          <View style={[styles.cta, { paddingBottom: 16 + bottomInset }]} testID="cart-checkout-bar">
             <View style={{ width: "100%", maxWidth: 760 }}>
               <Button title={`${t("checkout")} · ${chf(goods)}`} size="lg" icon="arrow-right" onPress={() => router.push("/checkout")} testID="cart-checkout-button" />
             </View>
