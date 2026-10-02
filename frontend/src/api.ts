@@ -128,6 +128,15 @@ export function useActiveOrders(pollMs = 3000) {
   });
 }
 
+/** Manager "Historique": every finished (completed / cancelled) order created on that calendar day (Europe/Zurich), no time limit. */
+export function useHistoryOrders(date: string) {
+  return useQuery({
+    queryKey: ["orders", "history", date],
+    queryFn: () => api.get<Order[]>(`/orders?date=${date}`),
+    refetchInterval: 10000,
+  });
+}
+
 export function useTicket(id: string | undefined) {
   return useQuery({
     queryKey: ["ticket", id],

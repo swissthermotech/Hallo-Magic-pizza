@@ -1439,8 +1439,10 @@ async def search_customers(phone: str = Query(min_length=3), limit: int = 20, _:
 
 
 @api.get("/orders", response_model=List[Order])
-async def list_orders(active: bool = True, ids: Optional[str] = None, limit: int = 400, credentials: HTTPAuthorizationCredentials = Depends(auth_mod.bearer)):
-    """`ids=` -> the customer's own orders (device-stored ids, no auth). Without ids -> full staff list (manager/kitchen only)."""
+async def list_orders(active: bool = True, ids: Optional[str] = None, date: Optional[str] = None, limit: int = 400, credentials: HTTPAuthorizationCredentials = Depends(auth_mod.bearer)):
+    """`ids=` -> the customer's own orders (device-stored ids, no auth). Without ids -> staff list (manager/kitchen only):
+    `date=YYYY-MM-DD` -> Manager "Historique": EVERY finished (completed / cancelled) order created on that calendar day
+    (Europe/Zurich), plus pre-go-live legacy orders of that day – no time limit. Otherwise the live operational list."""
     q: Dict[str, Any] = {}
     if ids:
         q["_id"] = {"$in": [oid(i) for i in ids.split(",") if i]}
@@ -1448,13 +1450,23 @@ async def list_orders(active: bool = True, ids: Optional[str] = None, limit: int
         user = await staff_mod.staff_user(credentials)
         if user["role"] not in ("manager", "kitchen"):
             raise HTTPException(403, "Accès refusé pour ce rôle")
-    if not ids and active:
+    settings = await get_settings()
+    if not ids and date:
+        try:
+            _, start, end = day_range(date)
+        except ValueError:
+            raise HTTPException(400, "Date invalide")
+        q["created_at"] = {"$gte": start, "$lt": end}
+        finished: List[Dict[str, Any]] = [{"status": {"$in": list(TERMINAL)}}]
+        if settings.printing_enabled_at:
+            finished.append({"created_at": {"$lt": settings.printing_enabled_at}})
+        q["$or"] = finished
+    elif not ids and active:
         q["$or"] = [
             {"status": {"$nin": list(TERMINAL)}},
             {"status": {"$in": list(TERMINAL)}, "created_at": {"$gte": now_utc() - timedelta(hours=3)}},
         ]
     docs = await db.orders.find(q).sort("created_at", -1).to_list(limit)
-    settings = await get_settings()
     for d in docs:
         d["legacy"] = is_historical(d, settings)  # dashboards move these out of the operational lists
     return [Order.from_mongo(d) for d in docs]

@@ -6,7 +6,7 @@ import { Feather } from "@react-native-vector-icons/feather";
 import Animated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useActiveOrders } from "@/src/api";
+import { useActiveOrders, useHistoryOrders } from "@/src/api";
 import { useStaff } from "@/src/staff-auth";
 import { useStaffSound } from "@/src/staff-sound";
 import { FirstDeliveryControl } from "@/src/components/first-delivery";
@@ -15,6 +15,13 @@ import { OrderCard, OrderDetail, isScheduledLater } from "@/src/components/staff
 import type { StringKey } from "@/src/i18n";
 
 type Filter = "new" | "scheduled" | "progress" | "done";
+// Business day in Europe/Zurich (same helpers as the driver closing screen)
+const todayZurich = () => new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Zurich" }); // YYYY-MM-DD
+const shiftDay = (d: string, days: number) => {
+  const x = new Date(d + "T12:00:00");
+  x.setDate(x.getDate() + days);
+  return x.toISOString().slice(0, 10);
+};
 type NavItem = { testID: string; href: string; icon: React.ComponentProps<typeof Feather>["name"]; label: StringKey; manager?: boolean };
 const NAV: NavItem[] = [
   { testID: "staff-go-kitchen", href: "/staff/kitchen", icon: "coffee", label: "kitchen" },
@@ -38,6 +45,10 @@ export default function StaffDashboard() {
   const { data, isLoading } = useActiveOrders(3000);
   const orders = useMemo(() => data ?? [], [data]);
   const [filter, setFilter] = useState<Filter>("new");
+  // Historique = real day archive: every finished order of the selected calendar day (default today), any age
+  const [histDate, setHistDate] = useState(todayZurich());
+  const { data: histData, isLoading: histLoading } = useHistoryOrders(histDate);
+  const history = useMemo(() => histData ?? [], [histData]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Sound + new-order detection are shared for the whole staff area (see src/staff-sound.tsx)
   const { soundOn, unlocked: soundUnlocked, enable: unlockSound, toggle: toggleSound, fresh: alert, dismiss: dismissAlert } = useStaffSound();
@@ -49,18 +60,20 @@ export default function StaffDashboard() {
     scheduled: live.filter((o) => isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)).length,
     scheduledPending: live.filter((o) => isScheduledLater(o) && o.status === "pending").length,
     progress: live.filter((o) => !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)).length,
-    done: orders.filter((o) => o.legacy || ["completed", "cancelled"].includes(o.status)).length,
-  }), [orders, live]);
+    done: history.length,
+  }), [live, history]);
 
-  const list = orders
-    .filter((o) =>
-      filter === "new" ? !o.legacy && o.status === "pending" && !isScheduledLater(o)
-        : filter === "scheduled" ? !o.legacy && isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)
-          : filter === "progress" ? !o.legacy && !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o)
-            : o.legacy || ["completed", "cancelled"].includes(o.status),
-    )
-    .sort((a, b) => (filter === "scheduled" ? (a.scheduled_for || "").localeCompare(b.scheduled_for || "") : 0));
-  const selected = orders.find((o) => o.id === selectedId);
+  const list = filter === "done"
+    ? history
+    : orders
+      .filter((o) =>
+        filter === "new" ? !o.legacy && o.status === "pending" && !isScheduledLater(o)
+          : filter === "scheduled" ? !o.legacy && isScheduledLater(o) && !["completed", "cancelled"].includes(o.status)
+            : !o.legacy && !["pending", "completed", "cancelled"].includes(o.status) && !isScheduledLater(o),
+      )
+      .sort((a, b) => (filter === "scheduled" ? (a.scheduled_for || "").localeCompare(b.scheduled_for || "") : 0));
+  const selected = orders.find((o) => o.id === selectedId) ?? history.find((o) => o.id === selectedId);
+  const listLoading = filter === "done" ? histLoading : isLoading;
   const cardWidth = cols === 1 ? "100%" : cols === 2 ? "49%" : "32.4%";
 
   return (
@@ -123,11 +136,26 @@ export default function StaffDashboard() {
         {role === "manager" ? <View style={wide ? { width: 360 } : undefined}><FirstDeliveryControl /></View> : null}
       </View>
 
-      {isLoading ? (
+      {/* Historique: day selector (default today, Europe/Zurich) – finished orders of that day, whatever their age */}
+      {filter === "done" ? (
+        <View style={styles.dateRow} testID="history-date-row">
+          <Pressable testID="history-prev-day" onPress={() => setHistDate(shiftDay(histDate, -1))} style={styles.dateBtn}><Feather name="chevron-left" size={18} color={colors.onSurface} /></Pressable>
+          <View style={{ flex: 1, alignItems: "center" }}>
+            <Text style={styles.date} testID="history-date">{histDate === todayZurich() ? `${t("today")} · ${histDate}` : histDate}</Text>
+            <Text style={styles.dateHint} numberOfLines={1}>{t("historyDayHint")}</Text>
+          </View>
+          <Pressable testID="history-next-day" onPress={() => setHistDate(shiftDay(histDate, 1))} style={styles.dateBtn}><Feather name="chevron-right" size={18} color={colors.onSurface} /></Pressable>
+          {histDate !== todayZurich() ? (
+            <Pressable testID="history-today" onPress={() => setHistDate(todayZurich())} style={styles.todayBtn}><Text style={styles.todayText}>{t("today").toUpperCase()}</Text></Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {listLoading ? (
         <View style={styles.center}><ActivityIndicator color={colors.brandPrimary} size="large" /></View>
       ) : (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={[styles.grid, { paddingBottom: insets.bottom + 24 }]}>
-          {list.length === 0 ? <View style={{ width: "100%" }}><Empty icon="inbox" title={t("noActiveOrders")} /></View> : null}
+          {list.length === 0 ? <View style={{ width: "100%" }}><Empty icon={filter === "done" ? "archive" : "inbox"} title={filter === "done" ? t("noHistoryOrders") : t("noActiveOrders")} /></View> : null}
           {list.map((o) => (
             <View key={o.id} style={{ width: cardWidth }}>
               <OrderCard order={o} selected={selected?.id === o.id} onPress={() => setSelectedId(o.id)} />
@@ -197,6 +225,12 @@ const useStyles = makeStyles((colors) => ({
   segCountText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.onSurface },
   segCountTextOn: { color: colors.onBrandPrimary },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  dateRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingTop: 6 },
+  dateBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
+  date: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.onSurface },
+  dateHint: { fontFamily: FONT_TEXT, fontSize: 11, color: colors.muted },
+  todayBtn: { height: 40, paddingHorizontal: 12, borderRadius: 20, backgroundColor: colors.surfaceInverse, alignItems: "center", justifyContent: "center" },
+  todayText: { fontFamily: FONT_TEXT, fontSize: 12, fontWeight: "800", color: colors.onSurfaceInverse },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 12, padding: 12 },
   modal: { flex: 1, backgroundColor: colors.surface, alignItems: "center" },
   modalInner: { flex: 1, width: "100%", maxWidth: 720 },
