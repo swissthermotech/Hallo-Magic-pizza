@@ -144,6 +144,7 @@ export interface Settings {
   phone: string;
   address: string;
   opening_hours: Record<string, string>;
+  min_lead_minutes?: number;
   first_delivery?: Record<string, string>;
   meat_fish_origin?: I18nText;
   temporarily_closed: boolean;

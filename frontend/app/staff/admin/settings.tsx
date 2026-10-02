@@ -95,6 +95,7 @@ export default function SettingsScreen() {
         {DAY_KEYS.map((d) => (
           <Field key={d} label={d.toUpperCase()} value={s.opening_hours[d] ?? ""} onChangeText={(v) => setS({ ...s, opening_hours: { ...s.opening_hours, [d]: v } })} testID={`settings-hours-${d}`} />
         ))}
+        <Field label={t("leadMinutes")} value={String(s.min_lead_minutes ?? 15)} onChangeText={(v) => setS({ ...s, min_lead_minutes: Math.max(0, parseInt(v, 10) || 0) })} keyboardType="number-pad" testID="settings-lead-minutes" />
 
         {/* Homepage carousel photos – add / replace / remove; "set as main" moves a photo to the first slot */}
         <Text style={styles.section}>{t("heroImages")}</Text>

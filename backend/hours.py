@@ -1,12 +1,20 @@
 """Customer ordering hours (Europe/Zurich). Pure functions – used by GET /settings (status + slots) and POST /orders validation.
 Settings.opening_hours: {"mon": "" (closed) | "11:00-14:00, 17:00-22:00", ...}
 Settings.delivery_cutoff_minutes: last delivery order N minutes before each window closes (15 -> 13:45 / 21:45).
+Settings.min_lead_minutes: earliest exact time = now + N minutes, rounded UP to the 15-min grid (15 -> at 21:15: 21:30, 21:45, 22:00).
 Settings.first_delivery: {"lunch": "11:30" | "closed" | "", "evening": "17:00" | ...} – manager quick control per service."""
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DAY_FR = {"mon": "lundi", "tue": "mardi", "wed": "mercredi", "thu": "jeudi", "fri": "vendredi", "sat": "samedi", "sun": "dimanche"}
+DEFAULT_LEAD = 15
+
+
+def lead_minutes(settings) -> int:
+    """Minimum lead time for an exact requested time (manager setting, default 15)."""
+    v = getattr(settings, "min_lead_minutes", None)
+    return DEFAULT_LEAD if v is None else max(0, int(v))
 
 
 def _hm(s: str) -> int:
@@ -50,6 +58,7 @@ def ordering_status(settings, now: datetime, step: int = 15) -> dict:
     """open_now / pickup_open / delivery_open, next opening text, and valid ASAP-relative slots for today."""
     oh = settings.opening_hours or {}
     cutoff = getattr(settings, "delivery_cutoff_minutes", 15) or 15
+    lead = lead_minutes(settings)
     fd = getattr(settings, "first_delivery", {}) or {}
     day = DAYS[now.weekday()]
     cur = now.hour * 60 + now.minute
@@ -63,9 +72,9 @@ def ordering_status(settings, now: datetime, step: int = 15) -> dict:
         fdl = first_delivery_for(fd, (a, b))
         if fdl is not None and a <= cur < b - cutoff:
             delivery_open = True
-            delivery_from = max(fdl, cur + 30)
-        # slots: 15-min grid, at least 30 min from now, inside the window
-        t = ((max(cur + 30, a) + step - 1) // step) * step
+            delivery_from = max(fdl, cur + lead)
+        # slots: 15-min grid, at least `lead` min from now (rounded up), inside the window
+        t = ((max(cur + lead, a) + step - 1) // step) * step
         while t <= b:
             if a <= t:
                 pickup_slots.append(_fmt(t))
@@ -100,16 +109,17 @@ def ordering_status(settings, now: datetime, step: int = 15) -> dict:
 
 
 def slots_for_day(settings, day_date, now: datetime, step: int = 15) -> Tuple[List[str], List[str]]:
-    """Valid pickup / delivery slots for a calendar day. Today: at least 30 min from now; future days: full windows."""
+    """Valid pickup / delivery slots for a calendar day. Today: at least `min_lead_minutes` from now; future days: full windows."""
     oh = settings.opening_hours or {}
     cutoff = getattr(settings, "delivery_cutoff_minutes", 15) or 15
+    lead = lead_minutes(settings)
     fd = getattr(settings, "first_delivery", {}) or {}
     today = day_date == now.date()
     cur = now.hour * 60 + now.minute if today else -1
     pickup, delivery = [], []
     for a, b in windows(oh, DAYS[day_date.weekday()]):
         fdl = first_delivery_for(fd, (a, b)) if today else a  # the manager's "first delivery" override is a same-day control
-        t = ((max(cur + 30, a) + step - 1) // step) * step
+        t = ((max(cur + lead, a) + step - 1) // step) * step
         while t <= b:
             pickup.append(_fmt(t))
             if fdl is not None and t >= fdl and t <= b - cutoff:

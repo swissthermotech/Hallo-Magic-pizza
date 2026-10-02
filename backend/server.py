@@ -256,6 +256,7 @@ class Settings(BaseModel):
     address: str = ""
     opening_hours: Dict[str, str] = {}
     delivery_cutoff_minutes: int = 15          # last delivery order before window end (13:45 / 21:45)
+    min_lead_minutes: int = 15                 # earliest exact time a customer can request = now + N min (rounded up to the 15-min grid)
     first_delivery: Dict[str, str] = {}        # {"lunch": "11:30", "evening": "17:00" | "closed"} – manager quick control
     meat_fish_origin: I18n = I18n()            # "Origine des viandes et poissons" – free text maintained by admin
     printing_enabled_at: Optional[datetime] = None
@@ -824,6 +825,8 @@ async def update_settings(body: Settings, _: dict = Depends(MANAGER)):
     body.opening_hours = {d: normalize_hours(v or "") for d, v in body.opening_hours.items()}
     if body.google_review_url and not body.google_review_url.startswith("https://"):
         raise HTTPException(400, "Le lien Google doit commencer par https://")
+    if not 0 <= body.min_lead_minutes <= 180:
+        raise HTTPException(400, "Délai minimum pour une heure précise: entre 0 et 180 minutes")
     await db.settings.update_one({"_id": "main"}, {"$set": body.model_dump()}, upsert=True)
     return body
 

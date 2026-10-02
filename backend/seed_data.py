@@ -250,6 +250,7 @@ DEFAULT_SETTINGS = {
         "fri": "11:00-14:00, 17:00-22:00", "sat": "11:00-14:00, 17:00-22:00", "sun": "11:00-14:00, 17:00-22:00",
     },
     "delivery_cutoff_minutes": 15,
+    "min_lead_minutes": 15,  # earliest exact time = now + 15 min (rounded up to the 15-min grid)
     "first_delivery": {"lunch": "", "evening": ""},
     "temporarily_closed": False,
     "closed_message": {"fr": "Nous sommes temporairement fermés.", "de": "Wir sind vorübergehend geschlossen."},
