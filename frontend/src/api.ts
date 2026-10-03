@@ -2,7 +2,7 @@ import { Platform } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { File as FSFile, UploadType } from "expo-file-system";
-import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress, CustomerProfile, CustomerSummary, LoyaltySummary, LoyaltyQuote } from "./types";
+import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress, CustomerProfile, CustomerSummary, LoyaltySummary, LoyaltyQuote, LoyaltyAuditEntry } from "./types";
 
 /**
  * ONE permanent production backend for Web, Manager and the iOS/Android apps.
@@ -366,6 +366,14 @@ export function useSetCustomerMarketing() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ key, consent }: { key: string; consent: boolean }) => api.put<{ consent: boolean; at: string | null; source: string | null }>(`/customers/${key}/marketing`, { consent }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
+  });
+}
+/** Manager-only: manual correction of a customer's current-cycle stamps (0..9); every change is journaled server-side. */
+export function useAdjustCustomerLoyalty() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ key, stamps }: { key: string; stamps: number }) => api.put<{ loyalty: LoyaltySummary; audit: LoyaltyAuditEntry[] }>(`/customers/${key}/loyalty`, { stamps }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
   });
 }

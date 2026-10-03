@@ -205,11 +205,45 @@ async def customer_profile(key: str, _: dict = Depends(_roles("manager", "phone"
     docs = await db.orders.find(_order_query(p)).sort("created_at", -1).to_list(500)
     # Carte Fidélité: digital progress of this account (users created by staff for phone orders have one too once they order)
     loyalty = await loyalty_mod.summary(db, key) if p["kind"] in ("account", "staff") else None
-    return {**p, "orders": [_ser(d) for d in docs], "loyalty": loyalty}
+    audit = await loyalty_audit(key) if loyalty is not None else []
+    return {**p, "orders": [_ser(d) for d in docs], "loyalty": loyalty, "loyalty_audit": audit}
 
 
 class MarketingIn(BaseModel):
     consent: bool
+
+
+class LoyaltyAdjustIn(BaseModel):
+    stamps: int  # 0..9 – stamps of the current cycle only
+
+
+def _ser_audit(a: dict) -> dict:
+    return {"id": str(a["_id"]), "previous": a["previous"], "new": a["new"], "manager": a.get("manager"), "at": a["at"].isoformat() if a.get("at") else None}
+
+
+async def loyalty_audit(user_id: str, limit: int = 5) -> List[dict]:
+    return [_ser_audit(a) async for a in db.loyalty_audit.find({"user_id": user_id}).sort("at", -1).limit(limit)]
+
+
+@router.put("/{key}/loyalty")
+async def staff_adjust_loyalty(key: str, body: LoyaltyAdjustIn, staff: dict = Depends(_roles("manager"))):
+    """Manager-only manual correction of a customer account's CURRENT-CYCLE stamps (0..9) – paper-card transfer,
+    test, goodwill. Rewards and lifetime statistics are never editable here. Every change is journaled in
+    `loyalty_audit` (previous value, new value, manager, date/time, customer) and the balance stays server-side."""
+    if not 0 <= body.stamps <= 9:
+        raise HTTPException(400, "Tampons: valeur entre 0 et 9")
+    u = await db.users.find_one({"_id": ObjectId(key)}) if ObjectId.is_valid(key) else None
+    if not u:
+        raise HTTPException(404, "Client introuvable – la Carte Fidélité n'existe que pour les comptes clients")
+    state = await loyalty_mod.get_state(db, key)
+    now = datetime.now(timezone.utc)
+    await db.loyalty.update_one({"_id": key}, {"$set": {"stamps": body.stamps, "updated_at": now}})
+    await db.loyalty_audit.insert_one({
+        "user_id": key, "customer": f"{u.get('first_name', '')} {u.get('last_name', '')}".strip(), "phone": u.get("phone"),
+        "field": "stamps", "previous": int(state["stamps"]), "new": body.stamps,
+        "manager": staff.get("name") or staff.get("role"), "role": staff.get("role"), "at": now,
+    })
+    return {"loyalty": await loyalty_mod.summary(db, key), "audit": await loyalty_audit(key)}
 
 
 @router.put("/{key}/marketing")

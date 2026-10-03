@@ -121,9 +121,17 @@ export interface CustomerSummary {
   created_at?: string | null;
   marketing: MarketingConsent;
 }
+export interface LoyaltyAuditEntry {
+  id: string;
+  previous: number;
+  new: number;
+  manager?: string | null;
+  at?: string | null;
+}
 export interface CustomerProfile extends CustomerSummary {
   orders: Order[];
   loyalty?: LoyaltySummary | null;
+  loyalty_audit?: LoyaltyAuditEntry[];
 }
 
 export interface DeliveryZone {
