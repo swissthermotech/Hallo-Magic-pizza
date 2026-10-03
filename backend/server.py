@@ -21,6 +21,7 @@ import photos as photos_mod
 import staff_auth as staff_mod
 import review_email as review_mod
 import customers as customers_mod
+import loyalty as loyalty_mod
 import snapshot as snapshot_mod
 from fastapi.responses import RedirectResponse
 import hours as hours_mod
@@ -433,11 +434,32 @@ class OrderItem(BaseModel):
     note: Optional[str] = None
     half: Optional[HalfInfo] = None  # second half (price = the more expensive pizza of the two)
     line_total: float
+    # Carte Fidélité: pizzas in this line (stamps) and the 50 % reward amount carried by this line (base price only)
+    loyalty_stamps: int = 0
+    loyalty_discount: float = 0.0
     # VAT snapshot at order time (product part = unit_price * quantity, extras carry their own snapshot)
     vat_rate: float = 0.0
     gross_amount: float = 0.0
     net_amount: float = 0.0
     vat_amount: float = 0.0
+
+
+class LoyaltyInfo(BaseModel):
+    """Carte Fidélité snapshot of an order (customer accounts only) – see loyalty.py."""
+    user_id: str
+    pizzas: int = 0                      # eligible pizzas (= stamps once the order is completed)
+    stamps_before: int = 0
+    rewards_before: int = 0
+    reserved_before: int = 0
+    rewards_applied: int = 0             # 50 % rewards used by this order
+    discount: float = 0.0                # CHF taken off the total
+    discounted_prices: List[float] = []  # base prices of the discounted pizza(s) (cheapest first)
+    stamps_preview: int = 0
+    finalized: bool = False              # set exactly once at completed / cancelled
+    finalized_at: Optional[datetime] = None
+    outcome: Optional[str] = None        # completed | cancelled
+    stamps_after: Optional[int] = None
+    rewards_after: Optional[int] = None
 
 
 class Notification(BaseModel):
@@ -470,6 +492,7 @@ class Order(BaseDocument):
     age_confirmed: bool = False
     age_required: Optional[int] = None  # 16 (beer/wine) or 18 (spirits) – staff/driver must check ID at handover
     user_id: Optional[str] = None       # customer account (None = guest)
+    loyalty: Optional[LoyaltyInfo] = None  # Carte Fidélité (accounts only)
     marketing_consent: Optional[bool] = None  # what the customer ticked at this checkout (audit; None = not asked, e.g. phone orders)
     station: Optional[int] = None       # phone orders: iPad "Poste 1" / "Poste 2"
     driver: Optional[str] = None        # delivery: "Livreur 1" / "Livreur 2" / "Livreur 3"
@@ -947,9 +970,11 @@ def collection_fields(payment_method: str, total: float) -> dict:
     return {"collection_method": method, "amount_due": round(total, 2), "payment_collected": False}
 
 
-async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bool = True, allow_half: bool = False, enforce_hours: bool = True) -> Order:
+async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bool = True, allow_half: bool = False, enforce_hours: bool = True,
+                        allocate_number: bool = True) -> Order:
     """Validates the cart against the live catalog and builds the full Order (prices + frozen VAT snapshot).
-    Shared by customer checkout (/orders) and staff phone orders (/phone-orders)."""
+    Shared by customer checkout (/orders), staff phone orders (/phone-orders) and the Carte Fidélité quote
+    (allocate_number=False: price preview only, no order number consumed)."""
     settings = await get_settings()
     local_now = datetime.now(TZ)
     # Scheduled (future-day) order? Validate the date/time against the opening hours of THAT day.
@@ -995,6 +1020,8 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         raise HTTPException(400, "Empty order")
 
     extras_by_id = {str(e["_id"]): e for e in await db.extras.find({}).to_list(500)}
+    pizza_cats = await loyalty_mod.pizza_category_ids(db) if user else None  # Carte Fidélité: customer accounts only
+    pizza_units: List[tuple] = []  # (base pizza price, item index) – one entry per eligible pizza
     items: List[OrderItem] = []
     subtotal = 0.0
     extras_total = 0.0
@@ -1071,9 +1098,13 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         extras_total += ex_sum * qty
         pg, pn, pv = split_vat(unit * qty, prod_rate)
         vat_groups[prod_rate] = vat_groups.get(prod_rate, 0.0) + pg
+        pizza = pizza_cats is not None and loyalty_mod.is_pizza(pdoc, pizza_cats)
+        if pizza:
+            pizza_units.extend([(base_price, len(items))] * qty)
         items.append(OrderItem(
             product_id=it.product_id, name=I18n(**pdoc["name"]), unit_price=unit, quantity=qty, size=size, options=opts,
             removed_ingredients=removed, extras=ex_list, note=(it.note or None), half=half, line_total=line_total,
+            loyalty_stamps=qty if pizza else 0,
             vat_rate=prod_rate, gross_amount=pg, net_amount=pn, vat_amount=pv,
         ))
     age_req = required_age(alcohol_products)
@@ -1092,15 +1123,25 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         delivery_fee = settings.delivery_fee
         if settings.free_delivery_from and goods >= settings.free_delivery_from:
             delivery_fee = 0.0
-    total = round(goods + delivery_fee, 2)
+    # Carte Fidélité (accounts only): every 10th eligible pizza -50 % on the cheapest pizza(s), base price only.
+    # Stamps/rewards become final when the order is completed (loyalty.finalize); here = plan + price.
+    discount = 0.0
+    loyalty_info: Optional[LoyaltyInfo] = None
+    if pizza_units:
+        state = await loyalty_mod.get_state(db, str(user["_id"]))
+        lp = loyalty_mod.plan(state, [price for price, _ in pizza_units])
+        for price, idx in sorted(pizza_units, key=lambda x: x[0])[: lp["rewards_applied"]]:
+            items[idx].loyalty_discount = round(items[idx].loyalty_discount + round(price * loyalty_mod.RATE, 2), 2)
+        discount = lp["discount"]
+        loyalty_info = LoyaltyInfo(user_id=str(user["_id"]), **lp)
+    total = round(goods + delivery_fee - discount, 2)
     if delivery_fee > 0:
         vat_groups[settings.delivery_fee_vat_rate] = vat_groups.get(settings.delivery_fee_vat_rate, 0.0) + round(delivery_fee, 2)
-    discount = 0.0  # promotions not implemented yet – allocation across VAT groups is handled in vat_breakdown()
-    breakdown = vat_breakdown(vat_groups, discount)
+    breakdown = vat_breakdown(vat_groups, discount)  # the discount is allocated proportionally across VAT groups
     total_net = round(sum(g.net for g in breakdown), 2)
     total_vat = round(sum(g.vat for g in breakdown), 2)
 
-    number = await next_order_number()
+    number = await next_order_number() if allocate_number else 0
     ts = now_utc()
     scheduled_for = None
     if sched_date:
@@ -1113,7 +1154,7 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         general_note=body.general_note or None,
         payment_method="pay_at_delivery" if body.type == "delivery" else "pay_at_pickup",
         language=body.language, age_confirmed=bool(age_req) and body.age_confirmed, age_required=age_req,
-        user_id=str(user["_id"]) if user else None,
+        user_id=str(user["_id"]) if user else None, loyalty=loyalty_info,
         subtotal=round(subtotal, 2), extras_total=round(extras_total, 2), delivery_fee=delivery_fee, total=total,
         subtotal_gross=goods, delivery_fee_gross=round(delivery_fee, 2), delivery_fee_vat_rate=settings.delivery_fee_vat_rate if delivery_fee > 0 else 0.0,
         discount_gross=discount, total_gross=total, vat_breakdown=breakdown, total_vat=total_vat, total_net=total_net,
@@ -1125,6 +1166,17 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
 
 
+async def compute_order_reserving_loyalty(body: OrderIn, user: Optional[dict], **kw) -> Order:
+    """compute_order + atomic hold of the Carte Fidélité reward(s) the order applies, so two simultaneous orders of the
+    same customer can never use the same reward twice. If another order changed the reservation in between, the price
+    is simply recomputed with the new state (a few retries, then 409)."""
+    for _ in range(5):
+        order = await compute_order(body, user, **kw)
+        if not order.loyalty or order.loyalty.rewards_applied == 0 or await loyalty_mod.reserve(db, order.loyalty.model_dump()):
+            return order
+    raise HTTPException(409, "Carte Fidélité en cours de mise à jour – veuillez réessayer")
+
+
 @api.post("/orders", response_model=Order)
 async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.optional_user)):
     # Customer Web/App checkout: e-mail is mandatory (order follow-up + review request); phone orders (staff) are not affected
@@ -1134,7 +1186,7 @@ async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.op
     body.customer.email = email
     if body.payment_method not in ("cash", "terminal", "pay_at_pickup", "pay_at_delivery"):
         raise HTTPException(400, "Invalid payment method")
-    order = await compute_order(body, user)
+    order = await compute_order_reserving_loyalty(body, user)
     if body.payment_method in ("cash", "terminal"):
         order.payment_method = body.payment_method  # drives ticket "A ENCAISSER · ESPECES/TERMINAL", driver screen and Clôture buckets
     doc = order.to_mongo()
@@ -1169,7 +1221,7 @@ async def create_phone_order(body: PhoneOrderIn, staff: dict = Depends(PHONE)):
     if (not body.requested_time or body.requested_time == "asap") and body.minutes is not None and not body.requested_date:
         # "in N minutes" agreed on the phone -> stored as the requested time (printed as LIVRAISON DEMANDÉE / RETRAIT À)
         body.requested_time = fmt_time(now_utc() + timedelta(minutes=body.minutes))
-    order = await compute_order(body, customer, enforce_minimum=False, allow_half=True, enforce_hours=False)  # staff overrides: minimum, hours, half/half
+    order = await compute_order_reserving_loyalty(body, customer, enforce_minimum=False, allow_half=True, enforce_hours=False)  # staff overrides: minimum, hours, half/half
     doc = order.to_mongo()
     doc.update({"station": body.station, "payment_method": body.payment_method, "client_request_id": body.client_request_id,
                 **collection_fields(body.payment_method, order.total)})
@@ -1431,6 +1483,44 @@ async def my_orders(user: dict = Depends(auth_mod.current_user), limit: int = 50
     return [Order.from_mongo(d) for d in docs]
 
 
+# ---------------------------------------------------------------------------
+# Carte Fidélité (customer accounts) – state lives server-side, same on every device
+# ---------------------------------------------------------------------------
+@api.get("/me/loyalty")
+async def my_loyalty(user: dict = Depends(auth_mod.current_user)):
+    return await loyalty_mod.summary(db, str(user["_id"]))
+
+
+class LoyaltyQuoteIn(BaseModel):
+    type: OrderType = "pickup"
+    items: List[OrderItemIn]
+    npa: Optional[str] = None  # delivery zone (fee / free-delivery threshold) – only affects the total shown
+
+
+@api.post("/loyalty/quote")
+async def loyalty_quote(body: LoyaltyQuoteIn, user: dict = Depends(auth_mod.current_user)):
+    """Checkout preview for a logged-in customer: the reward the cart qualifies for RIGHT NOW (same pricing code as
+    POST /orders, nothing is reserved or stored). The real amount is fixed when the order is placed."""
+    if not body.items:
+        return {"pizzas": 0, "rewards_applied": 0, "discount": 0.0, "total": 0.0, "items": []}
+    probe = OrderIn(type=body.type, items=body.items,
+                    customer=CustomerIn(first_name=user.get("first_name") or "-", last_name=user.get("last_name") or "", phone=user.get("phone") or "-", email=user.get("email")),
+                    address=AddressIn(street="-", npa=body.npa or "", city="-") if body.type == "delivery" else None,
+                    requested_time="asap", age_confirmed=True, language="fr")
+    try:
+        o = await compute_order(probe, user, enforce_minimum=False, enforce_hours=False, allocate_number=False)
+    except HTTPException as e:
+        if e.status_code == 400 and "Zone de livraison" in str(e.detail):
+            probe.type = "pickup"; probe.address = None  # unknown NPA: still show the pizza reward, without the fee
+            o = await compute_order(probe, user, enforce_minimum=False, enforce_hours=False, allocate_number=False)
+        else:
+            raise
+    lp = o.loyalty
+    return {"pizzas": lp.pizzas if lp else 0, "stamps_before": lp.stamps_before if lp else 0, "rewards_applied": lp.rewards_applied if lp else 0,
+            "discount": lp.discount if lp else 0.0, "stamps_preview": lp.stamps_preview if lp else 0, "total": o.total,
+            "items": [{"index": i, "loyalty_discount": it.loyalty_discount, "loyalty_stamps": it.loyalty_stamps} for i, it in enumerate(o.items)]}
+
+
 @api.get("/customers/search")
 async def search_customers(phone: str = Query(min_length=3), limit: int = 20, _: dict = Depends(PHONE)):
     """Staff / phone-order lookup: accounts + past orders matching a phone number (accounts and guests)."""
@@ -1647,6 +1737,9 @@ async def push_status(doc: dict, status: str, notif: Optional[dict], extra_set: 
     if notif:
         update["$push"]["notifications"] = notif
     new = await db.orders.find_one_and_update({"_id": doc["_id"]}, update, return_document=ReturnDocument.AFTER)
+    if status in TERMINAL:
+        await loyalty_mod.finalize(db, new, status)  # Carte Fidélité: stamps/rewards become final (completed) or are released (cancelled)
+        new = await db.orders.find_one({"_id": doc["_id"]})
     return Order.from_mongo(new)
 
 

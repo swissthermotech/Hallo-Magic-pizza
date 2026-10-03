@@ -335,7 +335,7 @@ export function OrderDetail({ order: o, onClose }: { order: Order; onClose?: () 
         {o.general_note ? <Text style={styles.generalNote}>NOTE: {o.general_note}</Text> : null}
         <View style={styles.totalRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.totalLabel}>{t("total")}{o.delivery_fee > 0 ? ` (${t("deliveryFee").toLowerCase()} ${chf(o.delivery_fee)})` : ""}</Text>
+            <Text style={styles.totalLabel}>{t("total")}{o.delivery_fee > 0 ? ` (${t("deliveryFee").toLowerCase()} ${chf(o.delivery_fee)})` : ""}{o.loyalty && o.loyalty.discount > 0 ? ` · ${t("loyaltyTitle")} -${chf(o.loyalty.discount)}` : ""}</Text>
             <Text style={styles.pay}>{o.payment_method === "cash" ? t("payCash").toUpperCase() : o.payment_method === "terminal" ? t("payTerminal").toUpperCase() : o.payment_method === "pay_at_pickup" ? t("payAtPickup").toUpperCase() : t("payAtDelivery").toUpperCase()}</Text>
           </View>
           <Text style={styles.totalValue} testID="staff-detail-total">{chf(o.total)}</Text>

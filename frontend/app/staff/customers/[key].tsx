@@ -10,6 +10,7 @@ import { useStaff } from "@/src/staff-auth";
 import { chf, fmtDate, fmtTime, statusTone } from "@/src/format";
 import { sourceLabel } from "@/src/components/staff-order";
 import { Badge, Empty, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
+import { LoyaltyCard } from "@/src/components/loyalty-card";
 
 /** Customer profile (staff): identity, contact, addresses, statistics, marketing consent, complete order history. */
 export default function CustomerProfileScreen() {
@@ -56,6 +57,14 @@ export default function CustomerProfileScreen() {
           <StatBox label={t("lastOrder")} value={fmtDate(c.last_order_at)} testID="customer-last-order" />
           <StatBox label={t("totalSpent")} value={chf(c.total_spent)} testID="customer-total-spent" />
         </View>
+
+        {/* Carte Fidélité (accounts) – read-only digital progress */}
+        {c.loyalty ? (
+          <View>
+            <Text style={styles.section}>{t("loyaltyTitle")}</Text>
+            <LoyaltyCard summary={c.loyalty} compact testID="customer-loyalty" />
+          </View>
+        ) : null}
 
         {/* Addresses */}
         <View>

@@ -7,9 +7,10 @@ import { Feather } from "@react-native-vector-icons/feather";
 import { makeStyles, useTheme } from "@/src/theme";
 import { statusLabel, useI18n } from "@/src/i18n";
 import { useAuth } from "@/src/auth";
-import { authApi, useMyAccountOrders } from "@/src/api";
+import { authApi, useLoyalty, useMyAccountOrders } from "@/src/api";
 import { chf, fmtTime, statusTone } from "@/src/format";
 import { Badge, Button, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
+import { LoyaltyCard } from "@/src/components/loyalty-card";
 
 export default function AccountScreen() {
   const { ready, user } = useAuth();
@@ -94,6 +95,7 @@ function Profile() {
   const toast = useToast();
   const { user, logout, updateProfile, deleteAddress } = useAuth();
   const { data: orders } = useMyAccountOrders(true);
+  const { data: loyalty } = useLoyalty(true);
   const u = user!;
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState({ first_name: u.first_name, last_name: u.last_name, phone: u.phone, email: u.email || "" });
@@ -141,6 +143,9 @@ function Profile() {
           )}
         </View>
       </View>
+
+      {/* Carte Fidélité – server-side balance, identical on web / iOS / Android */}
+      {loyalty ? <LoyaltyCard summary={loyalty} testID="loyalty-card" /> : null}
 
       {/* Addresses */}
       <View>

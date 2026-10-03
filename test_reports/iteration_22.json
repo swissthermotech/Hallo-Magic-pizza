@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 22 — Carte Fidélité (digital loyalty card) end-to-end verification against the preview sandbox. BACKEND: `pytest tests/test_loyalty.py` passes with all 29 [OK] bullets; `pytest tests/test_slot_lead_time.py` passes 17/17 (compute_order regression clean). Live HTTP suite tests/test_loyalty_api_iter22.py: 5/5 PASS – GET /api/me/loyalty 401 without token, stamps=9/rewards_available=0/block=10 for the seeded account on two concurrent devices (same values), POST /api/loyalty/quote Margherita 32cm → rewards_applied=1, discount=7.00, total=7.00, rewards_reserved stays 0, boissons-only quote → pizzas=0 discount=0. FRONTEND (390x844): /account after login with 079 555 01 99 / Fidelity2026! shows LoyaltyCard between Profil and Adresses with testID loyalty-card, loyalty-card-progress='9 / 10', 9 filled stamps + 10th stamp labelled '-50%', loyalty-card-status='Votre prochaine pizza est à -50% !', FR rule text present. Language switch via lang-de on home shows 'Treuekarte', 'Ihre 10. Pizza zum halben Preis', 'Ihre nächste Pizza gibt es zum halben Preis!'. Checkout with 1x Margherita 32: checkout-loyalty-discount='- CHF 7.00', checkout-loyalty-hint='1 pizza(s) à -50% appliquée(s) grâce à votre Carte Fidélité', checkout-total='CHF 7.00', confirm-order-button='Confirmer la commande · CHF 7.00' (not pressed). Guest checkout with a pizza: no discount row, checkout-loyalty-login='Connectez-vous pour profiter de la Carte Fidélité : votre 10e pizza à -50%.', total CHF 14.00. Logged-in drink-only checkout: no discount row, no hint, total CHF 4.00. Manager (Preview-Manager-2026!) /staff/customers/6ac175db46799ae32c8ee0aa: section 'CARTE FIDÉLITÉ' with customer-loyalty + customer-loyalty-progress='9 / 10', no edit/reset controls. Loyalty state in Mongo unchanged after the run (stamps=9, reserved=0, rewards=0, lifetime_pizzas=19). Account screen still exposes Profil / Adresses / Historique / logout as before.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "styles using shadow* props", "issue": "Pre-existing console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' Not introduced by the loyalty feature. Reference: grep -rn 'shadow[A-Z]' /app/frontend/src"},
+      {"component": "pointerEvents prop", "issue": "Pre-existing console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents.' Not introduced by the loyalty feature."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_loyalty.py (existing – 29 OK)",
+    "/app/backend/tests/test_slot_lead_time.py (regression – 17 passed)",
+    "/app/backend/tests/test_loyalty_api_iter22.py (new – live HTTP coverage of /api/me/loyalty and /api/loyalty/quote)",
+    "/app/test_reports/pytest/iter22_loyalty_api.xml"
+  ],
+  "action_items": [
+    "(Optional, pre-existing) Migrate remaining shadowColor/shadowOffset/shadowOpacity/shadowRadius RN styles and props.pointerEvents to boxShadow / style.pointerEvents to silence the two console deprecation warnings. Not blocking."
+  ],
+  "critical_code_review_comments": [
+    "loyalty.py: plan() computes `usable = max(0, rewards + (stamps + n)//BLOCK - reserved)` – correctly uses only FINAL state, keeping rewards non-decreasing under completions/cancellations (comment in file).",
+    "loyalty.py reserve(): compare-and-set `{_id, reserved: reserved_before}` is the right primitive for the two-simultaneous-orders race; test_loyalty.py already covers it ('exactly one').",
+    "loyalty.py finalize(): claim-via-find_one_and_update on `loyalty.finalized:{$ne:true}` makes the stamp/reward move exactly-once, verified by the 'retried finalize' test.",
+    "frontend/app/checkout.tsx L289-297: discount row only shown when loyaltyDiscount>0; login hint only when guest AND cart non-empty – matches spec.",
+    "frontend/src/components/loyalty-card.tsx: 10 stamp cells, 10th is the reward stamp (-50% label), progress reads from `summary.stamps` / `summary.block` – no client-side computation of rewards (good)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_loyalty_api_iter22.py (new)"
+  ],
+  "success_rate": {"backend": "100% (29 loyalty bullets + 17 slot regressions + 5/5 live HTTP = 51/51)", "frontend": "100% (account FR+DE, checkout logged-in, checkout guest, checkout drink-only, manager profile)"},
+  "seed_data_creation": "None. The seeded loyalty doc for 6ac175db46799ae32c8ee0aa remained {stamps:9, reserved:0, rewards:0} after the entire run (verified via mongosh); the frontend tests stopped before pressing 'Confirmer la commande' so no order was created and PrintNode was never contacted.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reusable live HTTP suite at /app/backend/tests/test_loyalty_api_iter22.py (needs EXPO_PUBLIC_BACKEND_URL=https://hallo-magic-test.preview.emergentagent.com). The repo conftest.py autouses a manager JWT on unauthenticated calls – all customer-side tests include the word 'requires' in their name to bypass it. Frontend testIDs for this feature: loyalty-card, loyalty-card-progress, loyalty-card-stamp-{1..10}, loyalty-card-status, checkout-loyalty-discount, checkout-loyalty-hint, checkout-loyalty-login, customer-loyalty, customer-loyalty-progress. Staff login uses staff-password-input + staff-pin-submit. Expo was restarted mid-session (502 for ~30 s cold-start); if a navigation times out, retry after `sleep 30`."
+}

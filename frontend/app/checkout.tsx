@@ -7,7 +7,7 @@ import { Feather } from "@react-native-vector-icons/feather";
 import * as Haptics from "expo-haptics";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { useMenu, usePlaceOrder } from "@/src/api";
+import { useLoyaltyQuote, useMenu, usePlaceOrder } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { useOrderingStatus } from "@/src/api";
 import { useAuth } from "@/src/auth";
@@ -101,7 +101,10 @@ export default function CheckoutScreen() {
   const minimum = zone?.minimum_order || settings?.minimum_order || 0;
   const goods = cart.subtotal + cart.extrasTotal;
   const fee = type === "delivery" && settings ? (settings.free_delivery_from && goods >= settings.free_delivery_from ? 0 : settings.delivery_fee) : 0;
-  const total = goods + fee;
+  // Carte Fidélité (logged-in customers): server-side quote of the reward this cart qualifies for right now
+  const { data: loyaltyQuote } = useLoyaltyQuote(cart.items, type, f.npa.trim(), !!user);
+  const loyaltyDiscount = loyaltyQuote?.discount ?? 0;
+  const total = Math.max(0, goods + fee - loyaltyDiscount);
   const belowMin = type === "delivery" ? goods < minimum : false;
   const requestedTime = timeMode === "asap" ? "asap" : time;
 
@@ -283,6 +286,15 @@ export default function CheckoutScreen() {
           <SumRow label={t("subtotal")} value={chf(cart.subtotal)} />
           <SumRow label={t("extrasTotal")} value={chf(cart.extrasTotal)} />
           {type === "delivery" ? <SumRow label={t("deliveryFee")} value={fee === 0 ? t("free") : chf(fee)} /> : null}
+          {loyaltyDiscount > 0 ? <SumRow label={t("loyaltyDiscountRow")} value={`- ${chf(loyaltyDiscount)}`} testID="checkout-loyalty-discount" /> : null}
+          {loyaltyQuote && loyaltyQuote.pizzas > 0 ? (
+            <Text style={styles.loyaltyHint} testID="checkout-loyalty-hint">
+              {loyaltyQuote.rewards_applied > 0
+                ? t("loyaltyAppliedCheckout").replace("{n}", String(loyaltyQuote.rewards_applied))
+                : t("loyaltyEarnCheckout").replace("{n}", String(loyaltyQuote.pizzas)).replace("{p}", String(loyaltyQuote.stamps_preview))}
+            </Text>
+          ) : null}
+          {!user && cart.items.length > 0 ? <Text style={styles.loyaltyHint} testID="checkout-loyalty-login">{t("loyaltyLoginHint")}</Text> : null}
           <View style={styles.divider} />
           <View style={styles.row}>
             <Text style={styles.totalLabel}>{t("total")}</Text>
@@ -303,12 +315,12 @@ export default function CheckoutScreen() {
   );
 }
 
-function SumRow({ label, value }: { label: string; value: string }) {
+function SumRow({ label, value, testID }: { label: string; value: string; testID?: string }) {
   const styles = useStyles();
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
+      <Text style={styles.rowValue} testID={testID}>{value}</Text>
     </View>
   );
 }
@@ -346,6 +358,7 @@ const useStyles = makeStyles((colors) => ({
   payTitle: { fontFamily: FONT_TEXT, fontSize: 15, fontWeight: "800", color: colors.brandSecondary },
   payHint: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.onSurfaceSecondary, marginTop: 2 },
   summary: { backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 8 },
+  loyaltyHint: { fontFamily: FONT_TEXT, fontSize: 12, lineHeight: 17, color: colors.brandPrimary, fontWeight: "700" },
   row: { flexDirection: "row", justifyContent: "space-between" },
   rowLabel: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.onSurfaceSecondary },
   rowValue: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.onSurface, fontWeight: "600" },

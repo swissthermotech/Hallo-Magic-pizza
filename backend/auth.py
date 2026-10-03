@@ -240,6 +240,7 @@ async def delete_me(body: DeleteMeIn, user=Depends(current_user)):
     # Google-review request state of this person (account id / e-mail / phone) is personal data too
     erase = [{"user_id": uid}] + ([{"email": user["email"].strip().lower()}] if user.get("email") else []) + ([{"phone": digits}] if digits else [])
     await db.review_customers.delete_many({"$or": erase})
+    await db.loyalty.delete_one({"_id": uid})  # Carte Fidélité state belongs to the account
     await db.users.delete_one({"_id": user["_id"]})
     return {"ok": True, "anonymised_orders": len(order_ids)}
 

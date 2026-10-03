@@ -95,6 +95,7 @@ export default function OrderScreen() {
           {o.general_note ? <Text style={styles.note}>« {o.general_note} »</Text> : null}
           <View style={styles.divider} />
           {o.delivery_fee > 0 ? <Row label={t("deliveryFee")} value={chf(o.delivery_fee)} /> : null}
+          {o.loyalty && o.loyalty.discount > 0 ? <Row label={t("loyaltyDiscountRow")} value={`- ${chf(o.loyalty.discount)}`} /> : null}
           <View style={styles.row}>
             <Text style={styles.totalLabel}>{t("total")}</Text>
             <Text style={styles.totalValue} testID="order-total">{chf(o.total)}</Text>

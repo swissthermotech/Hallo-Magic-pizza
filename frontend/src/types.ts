@@ -123,6 +123,7 @@ export interface CustomerSummary {
 }
 export interface CustomerProfile extends CustomerSummary {
   orders: Order[];
+  loyalty?: LoyaltySummary | null;
 }
 
 export interface DeliveryZone {
@@ -209,7 +210,42 @@ export interface OrderItem {
   extras: OrderExtra[];
   note?: string | null;
   line_total: number;
+  loyalty_stamps?: number;   // Carte Fidélité: pizzas in this line
+  loyalty_discount?: number; // CHF of the 50 % reward carried by this line
   half?: { product_id: string; name: I18nText; removed_ingredients: Ingredient[]; note?: string | null } | null; // MOITIÉ/MOITIÉ (phone orders)
+}
+
+/** Carte Fidélité – server-side state of a customer account (same on every device). */
+export interface LoyaltySummary {
+  stamps: number;            // 0..9 of the current cycle
+  block: number;             // 10
+  rate: number;              // 0.5
+  rewards_available: number; // banked 50 % rewards ready for the next order
+  rewards_reserved: number;  // rewards applied by orders still in progress
+  open_orders: number;
+  lifetime_pizzas: number;
+  rewards_earned: number;
+  rewards_used: number;
+}
+export interface LoyaltyOrderInfo {
+  pizzas: number;
+  stamps_before: number;
+  rewards_applied: number;
+  discount: number;
+  discounted_prices: number[];
+  stamps_preview: number;
+  finalized: boolean;
+  outcome?: string | null;
+  stamps_after?: number | null;
+}
+export interface LoyaltyQuote {
+  pizzas: number;
+  stamps_before: number;
+  rewards_applied: number;
+  discount: number;
+  stamps_preview: number;
+  total: number;
+  items: { index: number; loyalty_discount: number; loyalty_stamps: number }[];
 }
 
 export interface Customer {
@@ -260,6 +296,7 @@ export interface Order {
   age_confirmed: boolean;
   age_required?: 16 | 18 | null;
   user_id?: string | null;
+  loyalty?: LoyaltyOrderInfo | null;
   marketing_consent?: boolean | null;
   station?: number | null;
   driver?: string | null;

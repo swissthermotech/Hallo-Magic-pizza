@@ -2,7 +2,7 @@ import { Platform } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { File as FSFile, UploadType } from "expo-file-system";
-import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress, CustomerProfile, CustomerSummary } from "./types";
+import type { Menu, Order, Product, Extra, Settings, Category, OrderType, CartItem, Customer, Address, User, SavedAddress, CustomerProfile, CustomerSummary, LoyaltySummary, LoyaltyQuote } from "./types";
 
 /**
  * ONE permanent production backend for Web, Manager and the iOS/Android apps.
@@ -33,7 +33,7 @@ let staffToken: string | null = null;
 export const setStaffToken = (t: string | null) => {
   staffToken = t;
 };
-const CUSTOMER_PATHS = ["/auth/register", "/auth/login", "/auth/me", "/me/orders"];
+const CUSTOMER_PATHS = ["/auth/register", "/auth/login", "/auth/me", "/me/orders", "/me/loyalty", "/loyalty/quote"];
 /** Staff devices send the staff role token; customer-account endpoints and customer checkout use the customer token. */
 const authHeaders = (path = ""): Record<string, string> => {
   const customer = CUSTOMER_PATHS.some((p) => path.startsWith(p)) || path === "/orders";
@@ -188,15 +188,7 @@ export function usePlaceOrder() {
       api.post<Order>("/orders", {
         type: p.type,
         source: SOURCE,
-        items: p.items.map((i) => ({
-          product_id: i.product_id,
-          quantity: i.quantity,
-          size_key: i.size?.key ?? null,
-          option_keys: i.options.map((o) => o.key),
-          removed_ingredient_ids: i.removed_ingredients.map((r) => r.id),
-          extras: i.extras.map((e) => ({ extra_id: e.extra_id, quantity: e.quantity })),
-          note: i.note || null,
-        })),
+        items: cartItemsPayload(p.items),
         customer: p.customer,
         address: p.address,
         requested_time: p.requested_time,
@@ -208,7 +200,38 @@ export function usePlaceOrder() {
         payment_method: p.payment_method,
         marketing_consent: !!p.marketing_consent,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["orders"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["loyalty"] });
+    },
+  });
+}
+
+/** Cart lines -> API items (shared by POST /orders and the Carte Fidélité quote so both price the same cart). */
+export const cartItemsPayload = (items: CartItem[]) =>
+  items.map((i) => ({
+    product_id: i.product_id,
+    quantity: i.quantity,
+    size_key: i.size?.key ?? null,
+    option_keys: i.options.map((o) => o.key),
+    removed_ingredient_ids: i.removed_ingredients.map((r) => r.id),
+    extras: i.extras.map((e) => ({ extra_id: e.extra_id, quantity: e.quantity })),
+    note: i.note || null,
+  }));
+
+// ---- Carte Fidélité (customer accounts; state is server-side, identical on every device) -----------------------
+export function useLoyalty(enabled: boolean) {
+  return useQuery({ queryKey: ["loyalty", "me"], queryFn: () => api.get<LoyaltySummary>("/me/loyalty"), enabled, refetchInterval: 15000 });
+}
+
+/** Checkout preview: reward the current cart qualifies for (nothing is reserved until the order is placed). */
+export function useLoyaltyQuote(items: CartItem[], type: OrderType, npa: string, enabled: boolean) {
+  const key = items.map((i) => `${i.product_id}:${i.size?.key ?? ""}:${i.quantity}:${i.options.map((o) => o.key).join("+")}`).join("|");
+  return useQuery({
+    queryKey: ["loyalty", "quote", type, npa, key],
+    queryFn: () => api.post<LoyaltyQuote>("/loyalty/quote", { type, items: cartItemsPayload(items), npa: npa || null }),
+    enabled: enabled && items.length > 0,
+    staleTime: 5000,
   });
 }
 

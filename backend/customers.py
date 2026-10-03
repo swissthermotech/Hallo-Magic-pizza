@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from auth import normalize_phone
 from database import db
+import loyalty as loyalty_mod
 
 router = APIRouter(prefix="/customers")
 
@@ -202,7 +203,9 @@ async def customer_profile(key: str, _: dict = Depends(_roles("manager", "phone"
     if not p:
         raise HTTPException(404, "Client introuvable")
     docs = await db.orders.find(_order_query(p)).sort("created_at", -1).to_list(500)
-    return {**p, "orders": [_ser(d) for d in docs]}
+    # Carte Fidélité: digital progress of this account (users created by staff for phone orders have one too once they order)
+    loyalty = await loyalty_mod.summary(db, key) if p["kind"] in ("account", "staff") else None
+    return {**p, "orders": [_ser(d) for d in docs], "loyalty": loyalty}
 
 
 class MarketingIn(BaseModel):
