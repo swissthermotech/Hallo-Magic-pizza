@@ -206,7 +206,7 @@ async def delete_me(body: DeleteMeIn, user=Depends(current_user)):
     1. every order of this person (linked by account id or by the account phone number) keeps its number, items, totals,
        statuses and timestamps but loses name / phone / e-mail / street / instructions (statistics + history stay intact);
     2. the ticket copies stored in print_jobs for those orders are redacted;
-    3. the marketing-consent record of the phone number is removed;
+    3. the marketing-consent record of the phone number and the Google-review request state of this person are removed;
     4. the account document is deleted -> every JWT of this customer is rejected from now on (current_user looks the
        user up on each request), so no server-side token store is needed.
     Refused while an order is still in progress (staff and drivers need the contact data to fulfil it)."""
@@ -237,6 +237,9 @@ async def delete_me(body: DeleteMeIn, user=Depends(current_user)):
                                         {"$set": {"content": "[contenu supprimé – compte client effacé]", "redacted_at": now}})
     if digits:
         await db.marketing_consents.delete_one({"phone": digits})
+    # Google-review request state of this person (account id / e-mail / phone) is personal data too
+    erase = [{"user_id": uid}] + ([{"email": user["email"].strip().lower()}] if user.get("email") else []) + ([{"phone": digits}] if digits else [])
+    await db.review_customers.delete_many({"$or": erase})
     await db.users.delete_one({"_id": user["_id"]})
     return {"ok": True, "anonymised_orders": len(order_ids)}
 

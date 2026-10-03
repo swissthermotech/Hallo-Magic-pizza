@@ -609,6 +609,10 @@ async def seed():
             # excluded forever – only customers who order from this moment on receive the review request.
             await db.settings.update_one({"_id": "main"}, {"$set": {"reviews_live_since": now_utc()}})
             logger.info("Review e-mails LIVE – only for orders created from now on")
+    try:
+        await review_mod.backfill_review_customers(db)  # one-time: customers who already clicked are never asked again
+    except Exception as e:
+        logger.error("Review state backfill failed: %s", e)
     asyncio.create_task(review_mod.review_loop(db, get_settings, now_utc))
     logger.info("Seed check complete")
 
@@ -838,7 +842,9 @@ async def review_redirect(order_id: str):
     if not s.google_review_url.startswith("https://"):
         raise HTTPException(404, "Lien d'avis non configuré")
     try:
-        await db.orders.update_one({"_id": oid(order_id)}, {"$set": {"review_clicked_at": now_utc()}})
+        o = await db.orders.find_one_and_update({"_id": oid(order_id)}, {"$set": {"review_clicked_at": now_utc()}})
+        if o:  # the customer clicked -> never ask this person again (account, e-mail or phone)
+            await review_mod.remember_customer(db, o, "clicked_at", now_utc())
     except Exception:
         pass
     return RedirectResponse(s.google_review_url, status_code=302)

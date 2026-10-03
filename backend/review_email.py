@@ -11,11 +11,14 @@ import re
 from datetime import timedelta
 from html import escape
 from html.parser import HTMLParser
+from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
 from pymongo import ReturnDocument
+
+from auth import normalize_phone
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -144,6 +147,91 @@ def build_review_email(lang: str, first_name: str, order_number: int, link: str)
     return subject, html
 
 
+# ---- per-customer state: never ask again after a click, and pause 3 completed orders after an unanswered request ---
+PAUSE_ORDERS = 3  # after a request that was NOT clicked, the next N completed orders get no e-mail
+
+
+def customer_keys(order: dict) -> dict:
+    """Identity of the customer behind an order: account id (logged-in) + e-mail + phone digits (guests)."""
+    c = order.get("customer") or {}
+    return {"user_id": order.get("user_id") or None,
+            "email": (c.get("email") or "").strip().lower() or None,
+            "phone": normalize_phone(c.get("phone") or "") or None}
+
+
+def _state_query(keys: dict) -> Optional[dict]:
+    ors = [{k: v} for k, v in keys.items() if v]
+    return {"$or": ors} if ors else None
+
+
+def _orders_query(keys: dict) -> Optional[dict]:
+    """Same identity, expressed on order documents (e-mail case-insensitive, phone by digits like Clients search)."""
+    ors = []
+    if keys["user_id"]:
+        ors.append({"user_id": keys["user_id"]})
+    if keys["email"]:
+        ors.append({"customer.email": {"$regex": f"^{re.escape(keys['email'])}$", "$options": "i"}})
+    if keys["phone"]:
+        ors.append({"customer.phone": {"$regex": r"\D*".join(keys["phone"]) + r"\D*$"}})
+    return {"$or": ors} if ors else None
+
+
+async def review_decision(db, order: dict) -> str:
+    """'send' | 'skipped_clicked' (customer already clicked a review link – never again)
+    | 'skipped_recent' (asked recently and fewer than PAUSE_ORDERS orders completed since)."""
+    keys = customer_keys(order)
+    sq = _state_query(keys)
+    if not sq:
+        return "send"
+    states = await db.review_customers.find(sq).to_list(20)
+    if any(s.get("clicked_at") for s in states):
+        return "skipped_clicked"
+    asked = [s["asked_at"] for s in states if s.get("asked_at")]
+    if not asked:
+        return "send"
+    since = max(asked)
+    # orders of this person completed AFTER the last request and BEFORE this one (processing order independent)
+    q = {**_orders_query(keys), "status": "completed", "completed_at": {"$gt": since, "$lt": order["completed_at"]}, "_id": {"$ne": order["_id"]}}
+    completed_since = await db.orders.count_documents(q)
+    return "send" if completed_since >= PAUSE_ORDERS else "skipped_recent"
+
+
+async def remember_customer(db, order: dict, field: str, when) -> None:
+    """Upsert the customer's review state (one document per customer; account id, e-mail and phone are all kept
+    so a guest order and a later account login resolve to the same person)."""
+    keys = customer_keys(order)
+    sq = _state_query(keys)
+    if not sq:
+        return
+    existing = await db.review_customers.find_one(sq)
+    sets = {k: v for k, v in keys.items() if v}
+    sets[field] = when
+    if field == "asked_at":
+        sets["asked_order_id"] = str(order["_id"])
+    if existing:
+        await db.review_customers.update_one({"_id": existing["_id"]}, {"$set": sets})
+    else:
+        await db.review_customers.insert_one(sets)
+
+
+async def backfill_review_customers(db) -> int:
+    """One-time (runs only while the collection is empty): derive the per-customer state from what already happened –
+    orders whose review e-mail was sent (asked_at) and orders whose link was clicked (clicked_at) – so customers who
+    clicked before this rule existed are never asked again. Returns the number of orders processed."""
+    if await db.review_customers.estimated_document_count() > 0:
+        return 0
+    n = 0
+    async for o in db.orders.find({"review_status": "sent", "review_sent_at": {"$exists": True}}).sort("review_sent_at", 1):
+        await remember_customer(db, o, "asked_at", o["review_sent_at"])
+        n += 1
+    async for o in db.orders.find({"review_clicked_at": {"$exists": True}}):
+        await remember_customer(db, o, "clicked_at", o["review_clicked_at"])
+        n += 1
+    if n:
+        logger.info("Review state backfilled from %d orders", n)
+    return n
+
+
 # ---- background loop --------------------------------------------------------------------------------------------
 async def process_due_reviews(db, settings, now) -> int:
     """One pass: claim + send for every eligible completed order. Returns the number of e-mails sent."""
@@ -160,17 +248,22 @@ async def process_due_reviews(db, settings, now) -> int:
     if cutoffs:
         q["created_at"] = {"$gte": max(cutoffs)}  # never mail customers of development/test/historical orders
     sent = 0
-    async for o in db.orders.find(q).limit(20):
+    async for o in db.orders.find(q).sort("completed_at", 1).limit(20):
         # Atomic claim: whichever worker flips review_status first owns the send – no duplicates, ever
         claimed = await db.orders.find_one_and_update({"_id": o["_id"], "review_status": {"$exists": False}},
                                                       {"$set": {"review_status": "sending"}}, return_document=ReturnDocument.AFTER)
         if not claimed:
             continue
         try:
+            decision = await review_decision(db, o)
+            if decision != "send":
+                await db.orders.update_one({"_id": o["_id"]}, {"$set": {"review_status": decision, "review_decided_at": now}})
+                continue
             link = f"{settings.public_url.rstrip('/')}/api/review/{o['_id']}/go"
             subject, html = build_review_email(o.get("language", "fr"), o["customer"].get("first_name", ""), o["order_number"], link)
             email_id = await send_email(to=o["customer"]["email"], subject=subject, html=html)
             await db.orders.update_one({"_id": o["_id"]}, {"$set": {"review_status": "sent", "review_sent_at": now, "review_email_id": email_id}})
+            await remember_customer(db, o, "asked_at", now)
             sent += 1
         except Exception as e:  # isolated: the order/payment flow is never affected
             logger.error("Review e-mail failed for order #%s: %s", o.get("order_number"), e)
