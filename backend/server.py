@@ -2008,6 +2008,8 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     lines += ["-" * W]
     if o.get("delivery_fee"):
         lines.append(f"{'Livraison':<{W-10}}{('CHF %.2f' % o['delivery_fee']):>10}")
+    if (o.get("loyalty") or {}).get("discount"):
+        lines.append(f"{'Carte Fidélité -50%':<{W-10}}{('-CHF %.2f' % o['loyalty']['discount']):>10}")
     lines.append(f"{'TOTAL:':<{W-12}}{('CHF %.2f' % o['total']):>12}")
     # Operational timestamps
     stamps = [("Recue", o.get("created_at")), ("Acceptee", o.get("accepted_at")), ("Prete", o.get("ready_at")), ("Partie", o.get("out_for_delivery_at")), ("Livree", o.get("delivered_at"))]
@@ -2092,8 +2094,12 @@ def build_receipt(o: dict, s: Settings) -> str:
     lines += ["-" * W, row("Sous-total", money(o.get("subtotal_gross", o["total"] - o.get("delivery_fee", 0))))]
     if o.get("delivery_fee"):
         lines.append(row("Frais de livraison", money(o["delivery_fee"])))
-    if o.get("discount_gross"):
-        lines.append(row("Remise", f"-{money(o['discount_gross'])}"))
+    loyalty_discount = (o.get("loyalty") or {}).get("discount") or 0
+    if loyalty_discount:
+        lines.append(row("Carte Fidélité -50%", f"-{money(loyalty_discount)}"))
+    other_discount = round((o.get("discount_gross") or 0) - loyalty_discount, 2)
+    if other_discount > 0:
+        lines.append(row("Remise", f"-{money(other_discount)}"))
     lines += ["=" * W, row("TOTAL", money(o["total"])), "=" * W,
               payment_label(o, False),
               "Statut: " + ("PAYÉ" if o.get("paid") else "à payer"), "", "TVA INCLUSE"]
