@@ -15,7 +15,7 @@ import type { Product } from "@/src/types";
 
 /**
  * Editorial, image-first product card.
- * - Customisable products open the detail page ("Personnaliser").
+ * - Pizzas (sizes / supplements / removable ingredients) open the detail page via "Commander".
  * - Simple products can be added directly ("Ajouter").
  */
 export function ProductCard({ product, onPress, index = 0 }: { product: Product; onPress: () => void; index?: number }) {
@@ -27,10 +27,12 @@ export function ProductCard({ product, onPress, index = 0 }: { product: Product;
   const off = !product.available;
   const hasSizes = product.sizes.length > 1;
   const price = product.sizes[0]?.price ?? product.price;
+  // Pizzas (sizes / supplements / removable ingredients) open the customization screen; simple products add directly
+  const opensDetail = product.customizable || hasSizes || product.ingredients.length > 0;
 
   const quickAdd = () => {
     if (off) return;
-    if (product.customizable || hasSizes) return onPress();
+    if (opensDetail) return onPress();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     cart.addItem({
       product_id: product.id, name: product.name, image_url: product.image_url, unit_price: price, quantity: 1,
@@ -74,15 +76,10 @@ export function ProductCard({ product, onPress, index = 0 }: { product: Product;
       <View style={styles.body}>
         <Text style={styles.desc} numberOfLines={2}>{tx(product.description)}</Text>
         <View style={styles.actions}>
-          {product.customizable || hasSizes ? (
-            <Pressable testID={`product-customize-${product.id}`} onPress={onPress} disabled={off} style={({ pressed }) => [styles.secondaryBtn, pressed && { opacity: 0.8 }, off && { opacity: 0.4 }]}>
-              <Feather name="sliders" size={15} color={colors.onSurface} />
-              <Text style={styles.secondaryText}>{t("customize")}</Text>
-            </Pressable>
-          ) : <View style={{ flex: 1 }} />}
+          <View style={{ flex: 1 }} />
           <Pressable testID={`product-add-${product.id}`} onPress={quickAdd} disabled={off} style={({ pressed }) => [styles.primaryBtn, pressed && { opacity: 0.85, transform: [{ scale: 0.97 }] }, off && { opacity: 0.4 }]}>
             <Feather name="plus" size={16} color={colors.onBrandPrimary} />
-            <Text style={styles.primaryText}>{product.customizable || hasSizes ? t("orderNow") : t("add")}</Text>
+            <Text style={styles.primaryText}>{opensDetail ? t("orderNow") : t("add")}</Text>
           </Pressable>
         </View>
       </View>
@@ -109,8 +106,6 @@ const useStyles = makeStyles((colors) => ({
   body: { paddingHorizontal: 4, paddingTop: 12, gap: 12 },
   desc: { fontFamily: FONT_TEXT, fontSize: 14, color: colors.muted, lineHeight: 20 },
   actions: { flexDirection: "row", alignItems: "center", gap: 10 },
-  secondaryBtn: { flex: 1, height: 46, borderRadius: 999, borderWidth: 1.5, borderColor: colors.borderStrong, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, backgroundColor: colors.surfaceSecondary },
-  secondaryText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "700", color: colors.onSurface },
   primaryBtn: { flex: 1, height: 46, borderRadius: 999, backgroundColor: colors.brandPrimary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
   primaryText: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "800", color: colors.onBrandPrimary, letterSpacing: 0.3 },
 }));
