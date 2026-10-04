@@ -125,14 +125,22 @@ async def _scenario():
         log.append(("2x 50 cm: 4 stamps planned", o["loyalty"]["stamps"] == 4 and o["items"][0]["loyalty_stamps"] == 4))
         await _cancel(o)
 
-        # ---- products that never count ----------------------------------------------------------------------
-        items = ([_item(bambino, "26")] if bambino else []) + ([_item(calzone)] if calzone else [])
-        if items:
-            o = await _place(user, items)
-            log.append((f"Bambino 26 cm / Calzone ({', '.join(i['name']['fr'] for i in o['items'])}): no stamps, no loyalty block",
-                        o.get("loyalty") is None and all(i["loyalty_stamps"] == 0 and i["loyalty_discount"] == 0 for i in o["items"])))
+        # ---- products that never count / Calzone = 1 stamp but never discounted --------------------------------
+        if bambino:
+            o = await _place(user, [_item(bambino, "26")])
+            log.append((f"Bambino/kids 26 cm ({o['items'][0]['name']['fr']}): no stamps, no loyalty block", o.get("loyalty") is None and o["items"][0]["loyalty_stamps"] == 0 and o["items"][0]["loyalty_discount"] == 0))
             await _complete(o)
             log.append(("... still 4/10", (await _state(uid))["stamps"] == 4))
+        if calzone:
+            o = await _place(user, [_item(calzone)])
+            log.append((f"Calzone ({o['items'][0]['name']['fr']}, no size): 1 stamp like a 32 cm, full price", o["loyalty"]["stamps"] == 1 and o["items"][0]["loyalty_stamps"] == 1 and o["loyalty"]["rewards_applied"] == 0 and o["total"] == calzone["price"]))
+            await _complete(o)
+            log.append(("Calzone completed -> 5/10", (await _state(uid))["stamps"] == 5))
+            await reset(stamps=4, rewards=1)
+            o = await _place(user, [_item(calzone)])
+            log.append(("reward + Calzone only: NO discount (not a 32 cm), reward kept, 1 stamp", o["loyalty"]["rewards_applied"] == 0 and o["loyalty"]["rewards_kept"] == 1 and o["loyalty"]["discount"] == 0 and o["items"][0]["loyalty_discount"] == 0 and o["loyalty"]["stamps"] == 1))
+            await _cancel(o)
+            await reset(stamps=4)
         o = await _place(user, [_item(drink), _item(dessert)])
         log.append(("drink + dessert: no stamps, no loyalty block", o.get("loyalty") is None and all(i["loyalty_stamps"] == 0 for i in o["items"])))
         await _complete(o)

@@ -26,7 +26,8 @@ from pymongo import ReturnDocument
 PIZZA_CATEGORY_SLUGS = {"pizza", "creer-votre-pizza"}
 BLOCK = 10        # stamps per reward
 RATE = 0.5        # 50 %
-STAMPS_BY_SIZE = {"32": 1, "40": 1, "50": 2}   # any other size (26 cm Bambino, no size) -> 0 stamps, never discounted
+STAMPS_BY_SIZE = {"32": 1, "40": 1, "50": 2}   # any other size (26 cm Bambino/kids) -> 0 stamps, never discounted
+CALZONE_STAMPS = 1                              # Calzone (pizza without size) = 1 stamp like a 32 cm, but never discounted
 REWARD_SIZE = "32"                              # the reward applies to ONE 32 cm pizza only
 
 _pizza_cat_cache: Dict[str, Any] = {"ids": None, "at": None}
@@ -50,11 +51,17 @@ def is_pizza(pdoc: dict, pizza_cats: set) -> bool:
     return str(pdoc.get("category_id")) in pizza_cats
 
 
+def is_calzone(pdoc: dict) -> bool:
+    return any("calzone" in str((pdoc.get("name") or {}).get(lang, "")).lower() for lang in ("fr", "de"))
+
+
 def stamps_for(pdoc: dict, size_key: Optional[str], pizza_cats: set) -> int:
     """Stamps ONE pizza of this product/size earns (0 = does not take part in the Carte Fidélité)."""
     if not is_pizza(pdoc, pizza_cats):
         return 0
-    return STAMPS_BY_SIZE.get(str(size_key or ""), 0)
+    if size_key:
+        return STAMPS_BY_SIZE.get(str(size_key), 0)
+    return CALZONE_STAMPS if is_calzone(pdoc) else 0
 
 
 async def get_state(db, user_id: str) -> dict:
@@ -69,12 +76,12 @@ async def get_state(db, user_id: str) -> dict:
 
 
 def plan(state: dict, pizzas: List[tuple]) -> dict:
-    """Reward plan for an order. `pizzas` = one (size_key, base_price) per counted pizza (stamps > 0).
+    """Reward plan for an order. `pizzas` = one (size_key, base_price, stamps) per counted pizza (stamps > 0).
     rewards usable now = banked rewards + rewards completed by this order's own stamps − rewards held by open orders;
     they are applied only to 32 cm pizzas (cheapest first) – without a 32 cm pizza nothing is consumed (`rewards_kept`)."""
     n = len(pizzas)
-    total = sum(STAMPS_BY_SIZE.get(str(s), 0) for s, _ in pizzas)
-    eligible = sorted(p for s, p in pizzas if str(s) == REWARD_SIZE)
+    total = sum(int(st) for _s, _p, st in pizzas)
+    eligible = sorted(p for s, p, _st in pizzas if str(s) == REWARD_SIZE)
     stamps, rewards, reserved = int(state["stamps"]), int(state["rewards"]), int(state["reserved"])
     usable = max(0, rewards + (stamps + total) // BLOCK - reserved)
     r = min(len(eligible), usable)

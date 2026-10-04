@@ -1023,7 +1023,7 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
 
     extras_by_id = {str(e["_id"]): e for e in await db.extras.find({}).to_list(500)}
     pizza_cats = await loyalty_mod.pizza_category_ids(db) if user else None  # Carte Fidélité: customer accounts only
-    pizza_units: List[tuple] = []  # (size key, base pizza price, item index) – one entry per counted pizza (32 / 40 / 50 cm)
+    pizza_units: List[tuple] = []  # (size key, base pizza price, stamps, item index) – one entry per counted pizza (32 / 40 / 50 cm, Calzone)
     items: List[OrderItem] = []
     subtotal = 0.0
     extras_total = 0.0
@@ -1102,7 +1102,7 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         vat_groups[prod_rate] = vat_groups.get(prod_rate, 0.0) + pg
         stamps_each = loyalty_mod.stamps_for(pdoc, size.key if size else None, pizza_cats) if pizza_cats is not None else 0
         if stamps_each:
-            pizza_units.extend([(size.key, base_price, len(items))] * qty)
+            pizza_units.extend([(size.key if size else None, base_price, stamps_each, len(items))] * qty)
         items.append(OrderItem(
             product_id=it.product_id, name=I18n(**pdoc["name"]), unit_price=unit, quantity=qty, size=size, options=opts,
             removed_ingredients=removed, extras=ex_list, note=(it.note or None), half=half, line_total=line_total,
@@ -1131,9 +1131,9 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
     loyalty_info: Optional[LoyaltyInfo] = None
     if pizza_units:
         state = await loyalty_mod.get_state(db, str(user["_id"]))
-        lp = loyalty_mod.plan(state, [(sk, price) for sk, price, _ in pizza_units])
+        lp = loyalty_mod.plan(state, [(sk, price, st) for sk, price, st, _ in pizza_units])
         eligible = sorted((u for u in pizza_units if u[0] == loyalty_mod.REWARD_SIZE), key=lambda x: x[1])
-        for _sk, price, idx in eligible[: lp["rewards_applied"]]:
+        for _sk, price, _st, idx in eligible[: lp["rewards_applied"]]:
             items[idx].loyalty_discount = round(items[idx].loyalty_discount + round(price * loyalty_mod.RATE, 2), 2)
         discount = lp["discount"]
         loyalty_info = LoyaltyInfo(user_id=str(user["_id"]), **lp)
