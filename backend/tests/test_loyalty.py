@@ -1,4 +1,4 @@
-"""Carte Fidélité – server-side loyalty rules (loyalty.py + compute_order / push_status wiring).
+"""Carte Fidélité – FINAL rules (32/40 cm = 1 stamp, 50 cm = 2; 10 stamps = -50 % on ONE 32 cm pizza) – loyalty.py + compute_order / push_status wiring.
 
 Runs against the sandbox DB with a throw-away customer account; orders are created through the same functions as
 POST /orders (compute_order_reserving_loyalty + insert) and completed via finish_order / push_status – acceptance
@@ -89,130 +89,202 @@ async def _scenario():
     uid = str(user["_id"])
     await db.loyalty.delete_one({"_id": uid})
     marg, drink, dessert, _extra = await _catalog()
-    sizes = {s["key"]: s["price"] for s in marg["sizes"]}   # 32: 14.00, 40: 25.00, 50: 31.00
-    small, mid, big = sorted(sizes, key=lambda k: sizes[k])
+    sizes = {s["key"]: s["price"] for s in marg["sizes"]}   # Margherita 32: 14.00, 40: 25.00, 50: 31.00
+    p32, p40, p50 = sizes["32"], sizes["40"], sizes["50"]
+    pizza_cats = [str(c["_id"]) for c in await db.categories.find({"slug": {"$in": ["pizza", "creer-votre-pizza"]}}).to_list(5)]
+    # a second pizza whose 32 cm is MORE expensive than the Margherita (cheapest-32-cm rule)
+    other = await db.products.find_one({"_id": {"$ne": marg["_id"]}, "deleted_at": None, "category_id": {"$in": pizza_cats},
+                                        "sizes": {"$elemMatch": {"key": "32", "price": {"$gt": p32}}}})
+    o32 = next(s["price"] for s in other["sizes"] if s["key"] == "32")
+    bambino = await db.products.find_one({"deleted_at": None, "category_id": {"$in": pizza_cats}, "sizes": {"$elemMatch": {"key": "26"}}})
+    calzone = await db.products.find_one({"deleted_at": None, "category_id": {"$in": pizza_cats}, "sizes": {"$in": [[], None]}})
+
+    async def reset(stamps=0, rewards=0):
+        await db.loyalty.update_one({"_id": uid}, {"$set": {"stamps": stamps, "rewards": rewards, "reserved": 0}}, upsert=True)
+
     try:
-        # 1) 0 stamps + 1 pizza -> no discount; 1/10 after completion
-        o = await _place(user, [_item(marg, small)])
-        log.append(("0 stamps + 1 pizza: no discount at checkout", o["loyalty"]["rewards_applied"] == 0 and o["loyalty"]["discount"] == 0 and o["total"] == sizes[small]))
-        s = await _state(uid)
-        log.append(("... stamps NOT yet added while order is open (0/10)", s["stamps"] == 0))
-        o = await _complete(o)
-        s = await _state(uid)
-        log.append(("... 1/10 after completion", s["stamps"] == 1 and o["loyalty"]["finalized"] and o["loyalty"]["stamps_after"] == 1))
+        # ---- stamp values -------------------------------------------------------------------------------------
+        o = await _place(user, [_item(marg, "32")])
+        log.append(("32 cm: 1 stamp planned, no discount, full price", o["loyalty"]["stamps"] == 1 and o["loyalty"]["rewards_applied"] == 0 and o["total"] == p32 and o["items"][0]["loyalty_stamps"] == 1))
+        log.append(("... stamps NOT added while the order is open (0/10)", (await _state(uid))["stamps"] == 0))
+        await _complete(o)
+        log.append(("32 cm completed -> 1/10", (await _state(uid))["stamps"] == 1))
 
-        # 2) drinks / desserts: no stamps
+        o = await _place(user, [_item(marg, "40")])
+        log.append(("40 cm: 1 stamp planned", o["loyalty"]["stamps"] == 1 and o["items"][0]["loyalty_stamps"] == 1))
+        await _complete(o)
+        log.append(("40 cm completed -> 2/10", (await _state(uid))["stamps"] == 2))
+
+        o = await _place(user, [_item(marg, "50")])
+        log.append(("50 cm: 2 stamps planned", o["loyalty"]["stamps"] == 2 and o["items"][0]["loyalty_stamps"] == 2 and o["loyalty"]["pizzas"] == 1))
+        await _complete(o)
+        s = await _state(uid)
+        log.append(("50 cm completed -> 4/10 (lifetime 3 pizzas)", s["stamps"] == 4 and s["lifetime_pizzas"] == 3))
+
+        o = await _place(user, [_item(marg, "50", qty=2)])
+        log.append(("2x 50 cm: 4 stamps planned", o["loyalty"]["stamps"] == 4 and o["items"][0]["loyalty_stamps"] == 4))
+        await _cancel(o)
+
+        # ---- products that never count ----------------------------------------------------------------------
+        items = ([_item(bambino, "26")] if bambino else []) + ([_item(calzone)] if calzone else [])
+        if items:
+            o = await _place(user, items)
+            log.append((f"Bambino 26 cm / Calzone ({', '.join(i['name']['fr'] for i in o['items'])}): no stamps, no loyalty block",
+                        o.get("loyalty") is None and all(i["loyalty_stamps"] == 0 and i["loyalty_discount"] == 0 for i in o["items"])))
+            await _complete(o)
+            log.append(("... still 4/10", (await _state(uid))["stamps"] == 4))
         o = await _place(user, [_item(drink), _item(dessert)])
-        log.append(("drink + dessert: 0 pizzas, no loyalty block", o.get("loyalty") is None and all(i["loyalty_stamps"] == 0 for i in o["items"])))
+        log.append(("drink + dessert: no stamps, no loyalty block", o.get("loyalty") is None and all(i["loyalty_stamps"] == 0 for i in o["items"])))
         await _complete(o)
-        log.append(("... still 1/10", (await _state(uid))["stamps"] == 1))
+        log.append(("... still 4/10", (await _state(uid))["stamps"] == 4))
 
-        # 3) 8 stamps + 1 pizza -> 9/10, no discount
-        await db.loyalty.update_one({"_id": uid}, {"$set": {"stamps": 8}})
-        o = await _place(user, [_item(marg, small)])
-        log.append(("8 stamps + 1 pizza: no discount", o["loyalty"]["rewards_applied"] == 0 and o["total"] == sizes[small]))
-        await _complete(o)
-        log.append(("... 9/10 after completion", (await _state(uid))["stamps"] == 9))
-
-        # 4) 9 stamps + 1 pizza -> 50 % on that pizza, cycle resets after completion
-        o = await _place(user, [_item(marg, mid)])
-        exp = round(sizes[mid] / 2, 2)
-        log.append((f"9 stamps + 1 pizza (CHF {sizes[mid]:.2f}): -50% = CHF {exp:.2f}", o["loyalty"]["rewards_applied"] == 1 and o["loyalty"]["discount"] == exp and o["total"] == round(sizes[mid] - exp, 2) and o["items"][0]["loyalty_discount"] == exp))
-        s = await _state(uid)
-        log.append(("... reward held while order is open (reserved=1, available=0)", s["rewards_reserved"] == 1 and s["rewards_available"] == 0))
+        # ---- 8 stamps + one 50 cm -> reaches 10 -> reward earned (banked: a 50 cm is never discounted) -------
+        await reset(stamps=8)
+        o = await _place(user, [_item(marg, "50")])
+        log.append(("8 stamps + one 50 cm: full price, reward NOT applied to the 50 cm (kept)", o["loyalty"]["rewards_applied"] == 0 and o["loyalty"]["rewards_kept"] == 1 and o["loyalty"]["discount"] == 0 and o["total"] == p50 and o["loyalty"]["stamps_preview"] == 0))
+        log.append(("... nothing reserved", (await _state(uid))["rewards_reserved"] == 0))
         o = await _complete(o)
         s = await _state(uid)
-        log.append(("... cycle reset after completion (0/10, nothing banked, nothing reserved)", s["stamps"] == 0 and s["rewards_available"] == 0 and s["rewards_reserved"] == 0 and o["loyalty"]["stamps_after"] == 0))
+        log.append(("... completed: 0/10 and 1 reward available", s["stamps"] == 0 and s["rewards_available"] == 1 and o["loyalty"]["rewards_after"] == 1))
 
-        # 5) retried completion -> no duplicate stamps
-        await lm.finalize(db, o, "completed")
-        await lm.finalize(db, o, "completed")
-        s = await _state(uid)
-        log.append(("retried finalize on the same order: still 0/10, rewards_used counted once", s["stamps"] == 0 and s["rewards_used"] == 1 and s["lifetime_pizzas"] == 3))
-
-        # 6) 9 stamps + several differently priced pizzas -> cheapest gets the 50 %
-        await db.loyalty.update_one({"_id": uid}, {"$set": {"stamps": 9}})
-        o = await _place(user, [_item(marg, big), _item(marg, small), _item(marg, mid)])
-        exp = round(sizes[small] / 2, 2)
-        cheap_line = next(i for i in o["items"] if i["size"]["key"] == small)
-        others = [i for i in o["items"] if i["size"]["key"] != small]
-        log.append((f"9 stamps + 3 pizzas ({sizes[big]:.0f}/{sizes[small]:.0f}/{sizes[mid]:.0f}): one reward on the cheapest (CHF {exp:.2f})",
-                    o["loyalty"]["rewards_applied"] == 1 and o["loyalty"]["discount"] == exp and cheap_line["loyalty_discount"] == exp and all(i["loyalty_discount"] == 0 for i in others)
-                    and o["total"] == round(sizes[big] + sizes[small] + sizes[mid] - exp, 2)))
+        # ---- reward + only 40/50 cm -> no discount, reward stays available --------------------------------------
+        o = await _place(user, [_item(marg, "40"), _item(marg, "50")])
+        log.append(("reward + 40 cm + 50 cm: no discount, full price, reward kept", o["loyalty"]["rewards_applied"] == 0 and o["loyalty"]["rewards_kept"] == 1 and o["loyalty"]["discount"] == 0 and o["total"] == round(p40 + p50, 2) and all(i["loyalty_discount"] == 0 for i in o["items"])))
         o = await _complete(o)
-        log.append(("... 9+3 = 12 -> 2/10 after completion", (await _state(uid))["stamps"] == 2 and o["loyalty"]["stamps_after"] == 2))
+        s = await _state(uid)
+        log.append(("... completed: reward still available, 3/10", s["rewards_available"] == 1 and s["rewards_reserved"] == 0 and s["stamps"] == 3 and o["loyalty"]["rewards_after"] == 1))
 
-        # 7) supplements stay full price; discount only on the base pizza price (a pizza that allows extras)
-        await db.loyalty.update_one({"_id": uid}, {"$set": {"stamps": 9}})
-        pz = await db.products.find_one({"allowed_extra_ids.0": {"$exists": True}, "sizes.0": {"$exists": True}, "deleted_at": None, "category_id": {"$in": [cid for cid in [str(c["_id"]) for c in await db.categories.find({"slug": "pizza"}).to_list(5)]]}})
+        # ---- reward + one 32 cm -> 50 % off that 32 cm ------------------------------------------------------------
+        o = await _place(user, [_item(marg, "32")])
+        exp = round(p32 / 2, 2)
+        log.append((f"reward + one 32 cm (CHF {p32:.2f}): -50 % = CHF {exp:.2f}", o["loyalty"]["rewards_applied"] == 1 and o["loyalty"]["discount"] == exp and o["total"] == round(p32 - exp, 2) and o["items"][0]["loyalty_discount"] == exp))
+        s = await _state(uid)
+        log.append(("... reward held while the order is open (reserved 1, available 0)", s["rewards_reserved"] == 1 and s["rewards_available"] == 0))
+        discounted_doc = o
+        o = await _complete(o)
+        s = await _state(uid)
+        log.append(("... completed: reward consumed, 4/10", s["rewards_available"] == 0 and s["rewards_reserved"] == 0 and s["rewards_used"] == 1 and s["stamps"] == 4 and o["loyalty"]["rewards_after"] == 0))
+
+        # ---- ticket / receipt line ------------------------------------------------------------------------------
+        settings = await server.get_settings()
+        ticket = server.strip_escpos(server.build_ticket(discounted_doc, settings))
+        receipt = server.build_receipt(discounted_doc, settings)
+        log.append(("kitchen ticket prints 'Carte Fidélité -50% pizza 32cm  -CHF 7.00' above TOTAL", f"Carte Fidélité -50% pizza 32cm" in ticket and f"-CHF {exp:.2f}" in ticket and ticket.index("Carte Fidélité") < ticket.index("TOTAL:")))
+        log.append(("receipt prints the same loyalty row", "Carte Fidélité -50% pizza 32cm" in receipt and f"-CHF {exp:.2f}" in receipt))
+
+        # ---- reward + several 32 cm (+ 40/50) -> discount on the CHEAPEST 32 cm only --------------------------------
+        await reset(stamps=4, rewards=1)
+        o = await _place(user, [_item(other, "32"), _item(marg, "32"), _item(marg, "40"), _item(marg, "50")])
+        exp = round(p32 / 2, 2)
+        by_line = {(i["name"]["fr"], i["size"]["key"]): i["loyalty_discount"] for i in o["items"]}
+        log.append((f"reward + {other['name']['fr']} 32 (CHF {o32:.2f}) + Margherita 32 (CHF {p32:.2f}) + 40 + 50: -50 % on the Margherita 32 only",
+                    o["loyalty"]["rewards_applied"] == 1 and o["loyalty"]["discount"] == exp and by_line[("Margherita", "32")] == exp
+                    and by_line[(other["name"]["fr"], "32")] == 0 and by_line[("Margherita", "40")] == 0 and by_line[("Margherita", "50")] == 0
+                    and o["total"] == round(o32 + p32 + p40 + p50 - exp, 2) and o["loyalty"]["stamps"] == 5))
+        o = await _complete(o)
+        log.append(("... completed: 4+5 = 9/10, no reward left", (await _state(uid))["stamps"] == 9 and (await _state(uid))["rewards_available"] == 0))
+
+        # ---- 9 stamps + one 32 cm -> the 10th stamp's pizza itself is -50 % (same order) -------------------------
+        o = await _place(user, [_item(marg, "32")])
+        log.append(("9 stamps + one 32 cm: reward earned by this order applied to that 32 cm", o["loyalty"]["rewards_applied"] == 1 and o["loyalty"]["discount"] == round(p32 / 2, 2)))
+        o = await _complete(o)
+        s = await _state(uid)
+        log.append(("... completed: cycle reset 0/10, nothing banked", s["stamps"] == 0 and s["rewards_available"] == 0 and s["rewards_reserved"] == 0))
+
+        # ---- 9 stamps + one 40 cm -> reward earned but banked (40 cm never discounted) --------------------------
+        await reset(stamps=9)
+        o = await _place(user, [_item(marg, "40")])
+        log.append(("9 stamps + one 40 cm: full price, reward kept for later", o["loyalty"]["rewards_applied"] == 0 and o["loyalty"]["rewards_kept"] == 1 and o["total"] == p40))
+        await _complete(o)
+        log.append(("... completed: 0/10 and 1 reward available", (await _state(uid))["stamps"] == 0 and (await _state(uid))["rewards_available"] == 1))
+
+        # ---- 8 stamps + 6x 50 cm + one 32 cm -> 8+12+1 = 21 -> 2 rewards earned: 1 applied (32 cm), 1 banked -----
+        await reset(stamps=8)
+        o = await _place(user, [_item(marg, "50", qty=6), _item(marg, "32")])
+        log.append(("8 stamps + 6x 50 cm + one 32 cm: 2 rewards earned, 1 applied to the 32 cm, 1 kept", o["loyalty"]["stamps"] == 13 and o["loyalty"]["rewards_applied"] == 1 and o["loyalty"]["rewards_kept"] == 1 and o["loyalty"]["discount"] == round(p32 / 2, 2)))
+        o = await _complete(o)
+        s = await _state(uid)
+        log.append(("... completed: 1/10, 1 reward banked", s["stamps"] == 1 and s["rewards_available"] == 1))
+
+        # ---- extras stay full price -------------------------------------------------------------------------------
+        pz = await db.products.find_one({"allowed_extra_ids.0": {"$exists": True}, "sizes": {"$elemMatch": {"key": "32"}}, "deleted_at": None, "category_id": {"$in": pizza_cats}})
         extra = await db.extras.find_one({"key": pz["allowed_extra_ids"][0]}) if pz else None
         if pz and extra:
             from server import OrderExtraIn
-            pz_small = min(pz["sizes"], key=lambda s: s["price"])
-            o = await _place(user, [_item(pz, pz_small["key"], extras=[OrderExtraIn(extra_id=str(extra["_id"]), quantity=1)])])
+            base = next(s["price"] for s in pz["sizes"] if s["key"] == "32")
+            o = await _place(user, [_item(pz, "32", extras=[OrderExtraIn(extra_id=str(extra["_id"]), quantity=1)])])
             ex_unit = o["items"][0]["extras"][0]["unit_price"]
-            exp = round(pz_small["price"] / 2, 2)
-            log.append((f"{pz['name']['fr']} {pz_small['label']} CHF {pz_small['price']:.2f} + supplement CHF {ex_unit:.2f}: discount = CHF {exp:.2f} (base only), supplement full price",
-                        o["loyalty"]["discount"] == exp and o["extras_total"] == ex_unit and o["total"] == round(pz_small["price"] + ex_unit - exp, 2) and o["items"][0]["loyalty_discount"] == exp))
-            await _cancel(o)  # keep 9 stamps for the next cases
+            exp = round(base / 2, 2)
+            log.append((f"reward + {pz['name']['fr']} 32 cm CHF {base:.2f} + supplement CHF {ex_unit:.2f}: discount CHF {exp:.2f} (base only), supplement full price",
+                        o["loyalty"]["discount"] == exp and o["extras_total"] == ex_unit and o["total"] == round(base + ex_unit - exp, 2) and o["items"][0]["loyalty_discount"] == exp))
+            await _cancel(o)
         else:
-            log.append(("supplement case skipped (no pizza with extras configured)", True))
+            log.append(("supplement case skipped (no 32 cm pizza with extras configured)", True))
 
-        # 8) cancelled order -> no stamps, reward not consumed
-        await db.loyalty.update_one({"_id": uid}, {"$set": {"stamps": 9, "reserved": 0, "rewards": 0}})
-        o = await _place(user, [_item(marg, small), _item(marg, mid)])
-        log.append(("cancel test: reward applied at checkout", o["loyalty"]["rewards_applied"] == 1 and (await _state(uid))["rewards_reserved"] == 1))
+        # ---- cancellation: no stamps, reward not consumed ------------------------------------------------------
+        await reset(stamps=9)
+        o = await _place(user, [_item(marg, "32"), _item(marg, "50")])
+        log.append(("cancel test: 9 + 3 stamps -> reward applied to the 32 cm, reserved", o["loyalty"]["rewards_applied"] == 1 and (await _state(uid))["rewards_reserved"] == 1))
+        used_before = (await _state(uid))["rewards_used"]
+        life_before = (await _state(uid))["lifetime_pizzas"]
         o = await _cancel(o)
         s = await _state(uid)
-        log.append(("cancelled -> still 9/10, reservation released, no reward consumed", s["stamps"] == 9 and s["rewards_reserved"] == 0 and o["loyalty"]["outcome"] == "cancelled" and s["rewards_used"] == 2))
+        log.append(("cancelled -> still 9/10, reservation released, no reward consumed, no stamps", s["stamps"] == 9 and s["rewards_reserved"] == 0 and s["rewards_available"] == 0 and s["rewards_used"] == used_before and s["lifetime_pizzas"] == life_before and o["loyalty"]["outcome"] == "cancelled"))
+        await reset(stamps=0, rewards=1)
+        o = await _place(user, [_item(marg, "32")])
+        o = await _cancel(o)
+        s = await _state(uid)
+        log.append(("banked reward + 32 cm cancelled -> reward available again", s["rewards_available"] == 1 and s["rewards_reserved"] == 0 and s["stamps"] == 0))
 
-        # 9) multi-threshold: 9 stamps + 11 pizzas -> 2 rewards on the two cheapest, 0/10 after
-        o = await _place(user, [_item(marg, big, qty=9), _item(marg, small), _item(marg, mid)])
-        exp = round(sizes[small] / 2, 2) + round(sizes[mid] / 2, 2)
-        log.append(("9 stamps + 11 pizzas: 2 rewards (cheapest two), 0/10 after", o["loyalty"]["rewards_applied"] == 2 and round(o["loyalty"]["discount"], 2) == round(exp, 2)))
+        # ---- retry / concurrency protection ----------------------------------------------------------------------
+        o = await _place(user, [_item(marg, "32")])
         o = await _complete(o)
-        log.append(("... (9+11)=20 -> 0/10, no banked reward", (await _state(uid))["stamps"] == 0 and (await _state(uid))["rewards_available"] == 0))
+        await lm.finalize(db, o, "completed")
+        await lm.finalize(db, o, "completed")
+        s = await _state(uid)
+        log.append(("retried finalize on the same order: 1/10 once, reward used once", s["stamps"] == 1 and s["rewards_available"] == 0 and s["rewards_used"] == used_before + 1))
 
-        # 10) concurrent orders with 9 stamps: the reward can be used only once
-        await db.loyalty.update_one({"_id": uid}, {"$set": {"stamps": 9, "reserved": 0, "rewards": 0}})
-        a, b = await asyncio.gather(_place(user, [_item(marg, small)]), _place(user, [_item(marg, small)]))
+        await reset(stamps=1, rewards=1)
+        a, b = await asyncio.gather(_place(user, [_item(marg, "32")]), _place(user, [_item(marg, "32")]))
         applied = [a["loyalty"]["rewards_applied"], b["loyalty"]["rewards_applied"]]
-        log.append((f"two simultaneous orders @9 stamps: rewards applied = {applied} (exactly one)", sorted(applied) == [0, 1] and (await _state(uid))["rewards_reserved"] == 1))
+        log.append((f"two simultaneous 32 cm orders with 1 reward: rewards applied = {applied} (exactly one)", sorted(applied) == [0, 1] and (await _state(uid))["rewards_reserved"] == 1))
         winner, loser = (a, b) if a["loyalty"]["rewards_applied"] else (b, a)
         await _complete(winner)
         s = await _state(uid)
-        log.append(("... winner completed: 0/10, nothing reserved", s["stamps"] == 0 and s["rewards_reserved"] == 0))
+        log.append(("... winner completed: reward consumed, 2/10", s["rewards_available"] == 0 and s["rewards_reserved"] == 0 and s["stamps"] == 2))
         await _complete(loser)
-        log.append(("... loser completed afterwards: 1/10 (its pizza is the 1st of the new cycle)", (await _state(uid))["stamps"] == 1))
+        log.append(("... loser completed afterwards at full price: 3/10", (await _state(uid))["stamps"] == 3))
 
-        # 11) cross-device / logout-login: a second JWT (other device) and the API both read the same server state
+        # ---- API: same state on every device, quote endpoint -----------------------------------------------------
         st, login = call("POST", "/auth/login", {"phone": PHONE, "password": "Fidelity2026!"})
         tok_b = login["access_token"]
         s1 = call("GET", "/me/loyalty", None, tok_a)[1]
         s2 = call("GET", "/me/loyalty", None, tok_b)[1]
-        log.append(("GET /me/loyalty identical for two sessions (two devices): " + f"{s1['stamps']}/10", s1["stamps"] == s2["stamps"] == 1 and s1["rewards_available"] == s2["rewards_available"]))
+        log.append(("GET /me/loyalty identical for two sessions: " + f"{s1['stamps']}/10", s1["stamps"] == s2["stamps"] == 3 and s1["rewards_available"] == s2["rewards_available"]))
         log.append(("GET /me/loyalty without token -> 401", call("GET", "/me/loyalty")[0] == 401))
 
-        # 12) checkout quote endpoint (no reservation, no order number consumed)
-        await db.loyalty.update_one({"_id": uid}, {"$set": {"stamps": 9}})
+        await reset(stamps=3, rewards=1)
         seq_before = (await db.counters.find_one({"_id": "orders"}))["seq"]
-        st, q = call("POST", "/loyalty/quote", {"type": "pickup", "items": [{"product_id": str(marg["_id"]), "quantity": 1, "size_key": small}]}, tok_b)
+        st, q = call("POST", "/loyalty/quote", {"type": "pickup", "items": [{"product_id": str(marg["_id"]), "quantity": 1, "size_key": "32"}]}, tok_b)
         seq_after = (await db.counters.find_one({"_id": "orders"}))["seq"]
         s = await _state(uid)
-        log.append((f"POST /loyalty/quote @9 stamps: discount CHF {q.get('discount')}, total CHF {q.get('total')}", st == 200 and q["rewards_applied"] == 1 and q["discount"] == round(sizes[small] / 2, 2) and q["total"] == round(sizes[small] / 2, 2)))
+        log.append((f"POST /loyalty/quote reward + 32 cm: stamps {q.get('stamps')}, discount CHF {q.get('discount')}, total CHF {q.get('total')}",
+                    st == 200 and q["stamps"] == 1 and q["rewards_applied"] == 1 and q["rewards_kept"] == 0 and q["discount"] == round(p32 / 2, 2) and q["total"] == round(p32 / 2, 2)))
         log.append(("... quote reserved nothing and consumed no order number", s["rewards_reserved"] == 0 and seq_before == seq_after))
+        st, q50 = call("POST", "/loyalty/quote", {"type": "pickup", "items": [{"product_id": str(marg["_id"]), "quantity": 1, "size_key": "50"}]}, tok_b)
+        log.append(("quote reward + 50 cm only: 2 stamps, no discount, reward kept", st == 200 and q50["stamps"] == 2 and q50["rewards_applied"] == 0 and q50["rewards_kept"] == 1 and q50["discount"] == 0 and q50["total"] == p50))
         st, q0 = call("POST", "/loyalty/quote", {"type": "pickup", "items": [{"product_id": str(drink["_id"]), "quantity": 2}]}, tok_b)
-        log.append(("quote with drinks only: 0 pizzas, no discount", st == 200 and q0["pizzas"] == 0 and q0["discount"] == 0))
+        log.append(("quote with drinks only: 0 stamps, no discount", st == 200 and q0["pizzas"] == 0 and q0["stamps"] == 0 and q0["discount"] == 0))
 
-        # 13) guest order (no account): no loyalty at all
-        body = OrderIn(type="pickup", items=[_item(marg, small)], customer=CustomerIn(first_name="Guest", phone="079 555 01 03", email="g@example.com"), requested_time="asap", age_confirmed=True)
+        # ---- guest order (no account): no loyalty at all -----------------------------------------------------------
+        body = OrderIn(type="pickup", items=[_item(marg, "32")], customer=CustomerIn(first_name="Guest", phone="079 555 01 03", email="g@example.com"), requested_time="asap", age_confirmed=True)
         g = await server.compute_order_reserving_loyalty(body, None, enforce_minimum=False, enforce_hours=False)
-        log.append(("guest order: no loyalty block, full price", g.loyalty is None and g.total == sizes[small]))
+        log.append(("guest order: no loyalty block, full price", g.loyalty is None and g.total == p32))
 
-        # 14) Manager profile exposes the digital progress
+        # ---- Manager profile exposes the digital progress --------------------------------------------------------
         st, lg = call("POST", "/auth/staff/login", {"password": "Preview-Manager-2026!"})
-        prof = call("GET", f"/customers/{uid}/profile", None, lg["access_token"])[1]
-        log.append(("Manager customer profile contains loyalty summary", prof.get("loyalty") is not None and prof["loyalty"]["stamps"] == 9))
+        prof = call("GET", f"/customers/{uid}/profile", None, lg["access_token"])[1] if st == 200 else {}
+        log.append(("Manager customer profile contains loyalty summary (3/10, 1 reward)", prof.get("loyalty") is not None and prof["loyalty"]["stamps"] == 3 and prof["loyalty"]["rewards_available"] == 1))
     finally:
         await _cleanup(uid)
     return log

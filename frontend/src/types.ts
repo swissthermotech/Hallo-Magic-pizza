@@ -236,9 +236,11 @@ export interface LoyaltySummary {
   rewards_used: number;
 }
 export interface LoyaltyOrderInfo {
-  pizzas: number;
+  pizzas: number;            // counted pizzas (32 / 40 / 50 cm)
+  stamps: number;            // stamps earned by this order (32/40 cm = 1, 50 cm = 2)
   stamps_before: number;
-  rewards_applied: number;
+  rewards_applied: number;   // 50 % rewards used (one 32 cm pizza each)
+  rewards_kept: number;      // rewards available but not consumed (no 32 cm pizza in the order)
   discount: number;
   discounted_prices: number[];
   stamps_preview: number;
@@ -248,8 +250,10 @@ export interface LoyaltyOrderInfo {
 }
 export interface LoyaltyQuote {
   pizzas: number;
+  stamps: number;
   stamps_before: number;
   rewards_applied: number;
+  rewards_kept: number;
   discount: number;
   stamps_preview: number;
   total: number;

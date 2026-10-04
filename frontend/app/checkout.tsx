@@ -291,9 +291,10 @@ export default function CheckoutScreen() {
             <Text style={styles.loyaltyHint} testID="checkout-loyalty-hint">
               {loyaltyQuote.rewards_applied > 0
                 ? t("loyaltyAppliedCheckout").replace("{n}", String(loyaltyQuote.rewards_applied))
-                : t("loyaltyEarnCheckout").replace("{n}", String(loyaltyQuote.pizzas)).replace("{p}", String(loyaltyQuote.stamps_preview))}
+                : t("loyaltyEarnCheckout").replace("{n}", String(loyaltyQuote.stamps)).replace("{p}", String(loyaltyQuote.stamps_preview))}
             </Text>
           ) : null}
+          {loyaltyQuote && loyaltyQuote.rewards_kept > 0 ? <Text style={styles.loyaltyHint} testID="checkout-loyalty-kept">{t("loyaltyKeptCheckout")}</Text> : null}
           {!user && cart.items.length > 0 ? <Text style={styles.loyaltyHint} testID="checkout-loyalty-login">{t("loyaltyLoginHint")}</Text> : null}
           <View style={styles.divider} />
           <View style={styles.row}>

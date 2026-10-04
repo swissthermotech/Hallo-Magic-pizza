@@ -447,13 +447,15 @@ class OrderItem(BaseModel):
 class LoyaltyInfo(BaseModel):
     """Carte Fidélité snapshot of an order (customer accounts only) – see loyalty.py."""
     user_id: str
-    pizzas: int = 0                      # eligible pizzas (= stamps once the order is completed)
+    pizzas: int = 0                      # counted pizzas (32 / 40 / 50 cm)
+    stamps: int = 0                      # stamps earned once the order is completed (32/40 cm = 1, 50 cm = 2)
     stamps_before: int = 0
     rewards_before: int = 0
     reserved_before: int = 0
-    rewards_applied: int = 0             # 50 % rewards used by this order
+    rewards_applied: int = 0             # 50 % rewards used by this order (one 32 cm pizza each)
+    rewards_kept: int = 0                # rewards available but NOT consumed (no 32 cm pizza in the order)
     discount: float = 0.0                # CHF taken off the total
-    discounted_prices: List[float] = []  # base prices of the discounted pizza(s) (cheapest first)
+    discounted_prices: List[float] = []  # base prices of the discounted 32 cm pizza(s) (cheapest first)
     stamps_preview: int = 0
     finalized: bool = False              # set exactly once at completed / cancelled
     finalized_at: Optional[datetime] = None
@@ -1021,7 +1023,7 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
 
     extras_by_id = {str(e["_id"]): e for e in await db.extras.find({}).to_list(500)}
     pizza_cats = await loyalty_mod.pizza_category_ids(db) if user else None  # Carte Fidélité: customer accounts only
-    pizza_units: List[tuple] = []  # (base pizza price, item index) – one entry per eligible pizza
+    pizza_units: List[tuple] = []  # (size key, base pizza price, item index) – one entry per counted pizza (32 / 40 / 50 cm)
     items: List[OrderItem] = []
     subtotal = 0.0
     extras_total = 0.0
@@ -1098,13 +1100,13 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         extras_total += ex_sum * qty
         pg, pn, pv = split_vat(unit * qty, prod_rate)
         vat_groups[prod_rate] = vat_groups.get(prod_rate, 0.0) + pg
-        pizza = pizza_cats is not None and loyalty_mod.is_pizza(pdoc, pizza_cats)
-        if pizza:
-            pizza_units.extend([(base_price, len(items))] * qty)
+        stamps_each = loyalty_mod.stamps_for(pdoc, size.key if size else None, pizza_cats) if pizza_cats is not None else 0
+        if stamps_each:
+            pizza_units.extend([(size.key, base_price, len(items))] * qty)
         items.append(OrderItem(
             product_id=it.product_id, name=I18n(**pdoc["name"]), unit_price=unit, quantity=qty, size=size, options=opts,
             removed_ingredients=removed, extras=ex_list, note=(it.note or None), half=half, line_total=line_total,
-            loyalty_stamps=qty if pizza else 0,
+            loyalty_stamps=stamps_each * qty,
             vat_rate=prod_rate, gross_amount=pg, net_amount=pn, vat_amount=pv,
         ))
     age_req = required_age(alcohol_products)
@@ -1123,14 +1125,15 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
         delivery_fee = settings.delivery_fee
         if settings.free_delivery_from and goods >= settings.free_delivery_from:
             delivery_fee = 0.0
-    # Carte Fidélité (accounts only): every 10th eligible pizza -50 % on the cheapest pizza(s), base price only.
+    # Carte Fidélité (accounts only): 10 stamps = -50 % on ONE 32 cm pizza (cheapest 32 cm, base price only).
     # Stamps/rewards become final when the order is completed (loyalty.finalize); here = plan + price.
     discount = 0.0
     loyalty_info: Optional[LoyaltyInfo] = None
     if pizza_units:
         state = await loyalty_mod.get_state(db, str(user["_id"]))
-        lp = loyalty_mod.plan(state, [price for price, _ in pizza_units])
-        for price, idx in sorted(pizza_units, key=lambda x: x[0])[: lp["rewards_applied"]]:
+        lp = loyalty_mod.plan(state, [(sk, price) for sk, price, _ in pizza_units])
+        eligible = sorted((u for u in pizza_units if u[0] == loyalty_mod.REWARD_SIZE), key=lambda x: x[1])
+        for _sk, price, idx in eligible[: lp["rewards_applied"]]:
             items[idx].loyalty_discount = round(items[idx].loyalty_discount + round(price * loyalty_mod.RATE, 2), 2)
         discount = lp["discount"]
         loyalty_info = LoyaltyInfo(user_id=str(user["_id"]), **lp)
@@ -1502,7 +1505,7 @@ async def loyalty_quote(body: LoyaltyQuoteIn, user: dict = Depends(auth_mod.curr
     """Checkout preview for a logged-in customer: the reward the cart qualifies for RIGHT NOW (same pricing code as
     POST /orders, nothing is reserved or stored). The real amount is fixed when the order is placed."""
     if not body.items:
-        return {"pizzas": 0, "rewards_applied": 0, "discount": 0.0, "total": 0.0, "items": []}
+        return {"pizzas": 0, "stamps": 0, "rewards_applied": 0, "rewards_kept": 0, "discount": 0.0, "total": 0.0, "items": []}
     probe = OrderIn(type=body.type, items=body.items,
                     customer=CustomerIn(first_name=user.get("first_name") or "-", last_name=user.get("last_name") or "", phone=user.get("phone") or "-", email=user.get("email")),
                     address=AddressIn(street="-", npa=body.npa or "", city="-") if body.type == "delivery" else None,
@@ -1516,7 +1519,8 @@ async def loyalty_quote(body: LoyaltyQuoteIn, user: dict = Depends(auth_mod.curr
         else:
             raise
     lp = o.loyalty
-    return {"pizzas": lp.pizzas if lp else 0, "stamps_before": lp.stamps_before if lp else 0, "rewards_applied": lp.rewards_applied if lp else 0,
+    return {"pizzas": lp.pizzas if lp else 0, "stamps": lp.stamps if lp else 0, "stamps_before": lp.stamps_before if lp else 0,
+            "rewards_applied": lp.rewards_applied if lp else 0, "rewards_kept": lp.rewards_kept if lp else 0,
             "discount": lp.discount if lp else 0.0, "stamps_preview": lp.stamps_preview if lp else 0, "total": o.total,
             "items": [{"index": i, "loyalty_discount": it.loyalty_discount, "loyalty_stamps": it.loyalty_stamps} for i, it in enumerate(o.items)]}
 
@@ -2009,7 +2013,7 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     if o.get("delivery_fee"):
         lines.append(f"{'Livraison':<{W-10}}{('CHF %.2f' % o['delivery_fee']):>10}")
     if (o.get("loyalty") or {}).get("discount"):
-        lines.append(f"{'Carte Fidélité -50%':<{W-10}}{('-CHF %.2f' % o['loyalty']['discount']):>10}")
+        lines.append(f"{'Carte Fidélité -50% pizza 32cm':<{W-10}}{('-CHF %.2f' % o['loyalty']['discount']):>10}")
     lines.append(f"{'TOTAL:':<{W-12}}{('CHF %.2f' % o['total']):>12}")
     # Operational timestamps
     stamps = [("Recue", o.get("created_at")), ("Acceptee", o.get("accepted_at")), ("Prete", o.get("ready_at")), ("Partie", o.get("out_for_delivery_at")), ("Livree", o.get("delivered_at"))]
@@ -2096,7 +2100,7 @@ def build_receipt(o: dict, s: Settings) -> str:
         lines.append(row("Frais de livraison", money(o["delivery_fee"])))
     loyalty_discount = (o.get("loyalty") or {}).get("discount") or 0
     if loyalty_discount:
-        lines.append(row("Carte Fidélité -50%", f"-{money(loyalty_discount)}"))
+        lines.append(row("Carte Fidélité -50% pizza 32cm", f"-{money(loyalty_discount)}"))
     other_discount = round((o.get("discount_gross") or 0) - loyalty_discount, 2)
     if other_discount > 0:
         lines.append(row("Remise", f"-{money(other_discount)}"))

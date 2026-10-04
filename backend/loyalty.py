@@ -1,7 +1,9 @@
 """Carte Fidélité – digital twin of the paper loyalty card (server-side source of truth, customer ACCOUNTS only).
 
-Rule: every eligible pizza = 1 stamp; every 10th pizza is 50 % off, always on the cheapest eligible pizza(s) of the order
-(base pizza price only – supplements, options, drinks, desserts, delivery fee never discounted).
+Rules (final): 32 cm pizza = 1 stamp, 40 cm = 1 stamp, 50 cm = 2 stamps; other pizzas (26 cm Bambino, sizeless Calzone),
+drinks, desserts, extras and delivery fees never count. Every 10 stamps = 1 reward = 50 % off ONE 32 cm pizza only
+(cheapest 32 cm base price of the order; supplements/options never discounted). A 40 / 50 cm pizza is never discounted.
+A reward is consumed only when a 32 cm pizza is in the order – otherwise it stays available for a future order.
 
 State (collection `loyalty`, _id = user id):
   stamps      0..9   stamps of the current cycle (final – completed orders only)
@@ -22,8 +24,10 @@ from typing import Any, Dict, List, Optional
 from pymongo import ReturnDocument
 
 PIZZA_CATEGORY_SLUGS = {"pizza", "creer-votre-pizza"}
-BLOCK = 10        # pizzas per reward
+BLOCK = 10        # stamps per reward
 RATE = 0.5        # 50 %
+STAMPS_BY_SIZE = {"32": 1, "40": 1, "50": 2}   # any other size (26 cm Bambino, no size) -> 0 stamps, never discounted
+REWARD_SIZE = "32"                              # the reward applies to ONE 32 cm pizza only
 
 _pizza_cat_cache: Dict[str, Any] = {"ids": None, "at": None}
 
@@ -46,6 +50,13 @@ def is_pizza(pdoc: dict, pizza_cats: set) -> bool:
     return str(pdoc.get("category_id")) in pizza_cats
 
 
+def stamps_for(pdoc: dict, size_key: Optional[str], pizza_cats: set) -> int:
+    """Stamps ONE pizza of this product/size earns (0 = does not take part in the Carte Fidélité)."""
+    if not is_pizza(pdoc, pizza_cats):
+        return 0
+    return STAMPS_BY_SIZE.get(str(size_key or ""), 0)
+
+
 async def get_state(db, user_id: str) -> dict:
     """The customer's loyalty document (created on first use)."""
     doc = await db.loyalty.find_one_and_update(
@@ -57,18 +68,21 @@ async def get_state(db, user_id: str) -> dict:
     return doc
 
 
-def plan(state: dict, units: List[float]) -> dict:
-    """Reward plan for an order containing `units` eligible pizzas (one base price per pizza).
-    rewards usable now = banked rewards + rewards completed by this order's own pizzas − rewards held by open orders."""
-    n = len(units)
+def plan(state: dict, pizzas: List[tuple]) -> dict:
+    """Reward plan for an order. `pizzas` = one (size_key, base_price) per counted pizza (stamps > 0).
+    rewards usable now = banked rewards + rewards completed by this order's own stamps − rewards held by open orders;
+    they are applied only to 32 cm pizzas (cheapest first) – without a 32 cm pizza nothing is consumed (`rewards_kept`)."""
+    n = len(pizzas)
+    total = sum(STAMPS_BY_SIZE.get(str(s), 0) for s, _ in pizzas)
+    eligible = sorted(p for s, p in pizzas if str(s) == REWARD_SIZE)
     stamps, rewards, reserved = int(state["stamps"]), int(state["rewards"]), int(state["reserved"])
-    usable = max(0, rewards + (stamps + n) // BLOCK - reserved)
-    r = min(n, usable)
-    cheapest = sorted(units)[:r]
+    usable = max(0, rewards + (stamps + total) // BLOCK - reserved)
+    r = min(len(eligible), usable)
+    cheapest = eligible[:r]
     amounts = [round(u * RATE, 2) for u in cheapest]
-    return {"pizzas": n, "stamps_before": stamps, "rewards_before": rewards, "reserved_before": reserved,
-            "rewards_applied": r, "discount": round(sum(amounts), 2), "discounted_prices": cheapest,
-            "stamps_preview": (stamps + n) % BLOCK, "finalized": False}
+    return {"pizzas": n, "stamps": total, "stamps_before": stamps, "rewards_before": rewards, "reserved_before": reserved,
+            "rewards_applied": r, "rewards_kept": usable - r, "discount": round(sum(amounts), 2), "discounted_prices": cheapest,
+            "stamps_preview": (stamps + total) % BLOCK, "finalized": False}
 
 
 async def reserve(db, info: dict) -> bool:
@@ -95,10 +109,11 @@ async def finalize(db, order: dict, outcome: str) -> None:
     if not claimed:
         return
     uid, p, r = info["user_id"], int(info.get("pizzas", 0)), int(info.get("rewards_applied", 0))
+    st = int(info.get("stamps", p))  # stamps earned by this order (orders created before the size rule: 1 per pizza)
     await get_state(db, uid)  # make sure the document exists
     if outcome == "completed":
-        # single atomic pipeline update: stamps = (stamps + p) mod 10, rewards += completed blocks − rewards used here
-        total = {"$add": ["$stamps", p]}
+        # single atomic pipeline update: stamps = (stamps + st) mod 10, rewards += completed blocks − rewards used here
+        total = {"$add": ["$stamps", st]}
         blocks = {"$floor": {"$divide": [total, BLOCK]}}
         new = await db.loyalty.find_one_and_update({"_id": uid}, [{"$set": {
             "stamps": {"$mod": [total, BLOCK]},
