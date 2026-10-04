@@ -41,7 +41,7 @@ export function MenuPanel() {
 
   const add = (p: Product) => {
     if (!p.available) return;
-    if (p.customizable || p.sizes.length > 1) {
+    if (p.customizable || p.sizes.length > 1 || p.ingredients.length > 0) {
       router.push({ pathname: "/product/[id]", params: { id: p.id } });
       return;
     }
@@ -79,7 +79,7 @@ export function MenuPanel() {
                 <Text style={styles.tileMeta} numberOfLines={1}>{p.sizes.length > 1 ? `${t("from")} ${chf(price)} · ${p.sizes.map((s) => s.label).join("/")}` : chf(price)}{p.is_alcohol ? ` · ${p.alcohol_type === "spirits" ? 18 : 16}+` : ""}</Text>
               </View>
               <View style={[styles.addBtn, inCart > 0 && styles.addBtnOn]}>
-                {inCart > 0 ? <Text style={styles.addCount}>{inCart}</Text> : <Feather name={p.customizable || p.sizes.length > 1 ? "sliders" : "plus"} size={18} color={colors.onBrandPrimary} />}
+                {inCart > 0 ? <Text style={styles.addCount}>{inCart}</Text> : <Feather name={p.customizable || p.sizes.length > 1 || p.ingredients.length > 0 ? "sliders" : "plus"} size={18} color={colors.onBrandPrimary} />}
               </View>
             </Pressable>
           );

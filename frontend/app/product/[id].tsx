@@ -248,7 +248,7 @@ export default function ProductScreen() {
             </View>
           ))}
 
-          {product.customizable && product.ingredients.length > 0 && !isCustom ? (
+          {product.ingredients.length > 0 && !isCustom ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>{t("removeIngredients")}</Text>
               <Text style={styles.hint}>{t("removeHint")}</Text>
