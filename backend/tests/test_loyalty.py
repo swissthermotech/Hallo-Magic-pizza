@@ -214,6 +214,26 @@ async def _scenario():
         s = await _state(uid)
         log.append(("... completed: 1/10, 1 reward banked", s["stamps"] == 1 and s["rewards_available"] == 1))
 
+        # ---- ONE reward per order maximum (production case: 10x Hawaii 32 cm, 9 stamps + 1 banked reward) -----------
+        hawaii = await db.products.find_one({"name.fr": {"$regex": "^hawa", "$options": "i"}, "deleted_at": None, "category_id": {"$in": pizza_cats}})
+        hw32 = next(s["price"] for s in hawaii["sizes"] if s["key"] == "32")
+        await reset(stamps=9, rewards=1)
+        o = await _place(user, [_item(hawaii, "32", qty=10)])
+        log.append((f"9 stamps + 1 banked reward + 10x Hawaii 32 cm (CHF {hw32 * 10:.2f}): ONE reward only -> -CHF {hw32 / 2:.2f}, 1 kept",
+                    o["subtotal"] == round(hw32 * 10, 2) and o["loyalty"]["rewards_applied"] == 1 and o["loyalty"]["rewards_kept"] == 1
+                    and o["loyalty"]["discount"] == round(hw32 / 2, 2) and o["total"] == round(hw32 * 10 - hw32 / 2, 2) and o["items"][0]["loyalty_discount"] == round(hw32 / 2, 2)))
+        log.append(("... only one reward reserved", (await _state(uid))["rewards_reserved"] == 1))
+        o = await _complete(o)
+        s = await _state(uid)
+        log.append(("... completed: (9+10) -> 9/10, 1 reward used, 1 still banked for a future order", s["stamps"] == 9 and s["rewards_available"] == 1 and s["rewards_reserved"] == 0 and o["loyalty"]["rewards_after"] == 1))
+        await reset(stamps=0, rewards=2)
+        o = await _place(user, [_item(marg, "32"), _item(other, "32")])
+        log.append((f"2 banked rewards + Margherita 32 + {other['name']['fr']} 32: ONE reward on the cheapest only, 1 kept",
+                    o["loyalty"]["rewards_applied"] == 1 and o["loyalty"]["rewards_kept"] == 1 and o["loyalty"]["discount"] == round(p32 / 2, 2)
+                    and o["items"][0]["loyalty_discount"] == round(p32 / 2, 2) and o["items"][1]["loyalty_discount"] == 0))
+        await _cancel(o)
+        log.append(("... cancelled: both rewards available again", (await _state(uid))["rewards_available"] == 2))
+
         # ---- extras stay full price -------------------------------------------------------------------------------
         pz = await db.products.find_one({"allowed_extra_ids.0": {"$exists": True}, "sizes": {"$elemMatch": {"key": "32"}}, "deleted_at": None, "category_id": {"$in": pizza_cats}})
         extra = await db.extras.find_one({"key": pz["allowed_extra_ids"][0]}) if pz else None

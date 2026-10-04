@@ -3,7 +3,8 @@
 Rules (final): 32 cm pizza = 1 stamp, 40 cm = 1 stamp, 50 cm = 2 stamps; other pizzas (26 cm Bambino, sizeless Calzone),
 drinks, desserts, extras and delivery fees never count. Every 10 stamps = 1 reward = 50 % off ONE 32 cm pizza only
 (cheapest 32 cm base price of the order; supplements/options never discounted). A 40 / 50 cm pizza is never discounted.
-A reward is consumed only when a 32 cm pizza is in the order – otherwise it stays available for a future order.
+At most ONE reward is redeemed per order; a reward is consumed only when a 32 cm pizza is in the order – otherwise
+(and for any further rewards) it stays banked for a future order.
 
 State (collection `loyalty`, _id = user id):
   stamps      0..9   stamps of the current cycle (final – completed orders only)
@@ -26,6 +27,7 @@ from pymongo import ReturnDocument
 PIZZA_CATEGORY_SLUGS = {"pizza", "creer-votre-pizza"}
 BLOCK = 10        # stamps per reward
 RATE = 0.5        # 50 %
+MAX_REWARDS_PER_ORDER = 1                       # one reward (= one 32 cm pizza at -50 %) per order, the rest stays banked
 STAMPS_BY_SIZE = {"32": 1, "40": 1, "50": 2}   # any other size (26 cm Bambino/kids) -> 0 stamps, never discounted
 CALZONE_STAMPS = 1                              # Calzone (pizza without size) = 1 stamp like a 32 cm, but never discounted
 REWARD_SIZE = "32"                              # the reward applies to ONE 32 cm pizza only
@@ -78,13 +80,14 @@ async def get_state(db, user_id: str) -> dict:
 def plan(state: dict, pizzas: List[tuple]) -> dict:
     """Reward plan for an order. `pizzas` = one (size_key, base_price, stamps) per counted pizza (stamps > 0).
     rewards usable now = banked rewards + rewards completed by this order's own stamps − rewards held by open orders;
-    they are applied only to 32 cm pizzas (cheapest first) – without a 32 cm pizza nothing is consumed (`rewards_kept`)."""
+    at most ONE is applied per order, only to a 32 cm pizza (cheapest first) – without a 32 cm pizza nothing is consumed.
+    Rewards not applied stay banked (`rewards_kept`)."""
     n = len(pizzas)
     total = sum(int(st) for _s, _p, st in pizzas)
     eligible = sorted(p for s, p, _st in pizzas if str(s) == REWARD_SIZE)
     stamps, rewards, reserved = int(state["stamps"]), int(state["rewards"]), int(state["reserved"])
     usable = max(0, rewards + (stamps + total) // BLOCK - reserved)
-    r = min(len(eligible), usable)
+    r = min(len(eligible), usable, MAX_REWARDS_PER_ORDER)
     cheapest = eligible[:r]
     amounts = [round(u * RATE, 2) for u in cheapest]
     return {"pizzas": n, "stamps": total, "stamps_before": stamps, "rewards_before": rewards, "reserved_before": reserved,
