@@ -979,6 +979,10 @@ async def compute_order(body: OrderIn, user: Optional[dict], enforce_minimum: bo
     (allocate_number=False: price preview only, no order number consumed)."""
     settings = await get_settings()
     local_now = datetime.now(TZ)
+    # Fully closed calendar day (no opening window today): no customer order at all – neither for today nor for a future
+    # day (staff phone orders pass enforce_hours=False). Reopens automatically with the next open day's normal rules.
+    if enforce_hours and hours_mod.closed_all_day(settings, local_now):
+        raise HTTPException(400, hours_mod.CLOSED_TODAY_FR)
     # Scheduled (future-day) order? Validate the date/time against the opening hours of THAT day.
     sched_date = None
     if body.requested_date:
@@ -1619,6 +1623,15 @@ def fmt_date(dt: Optional[datetime]) -> str:
     return f"{hours_mod.DAY_FR[hours_mod.DAYS[local.weekday()]]} {local.strftime('%d.%m.%Y')}"
 
 
+def fmt_dt(dt: Optional[datetime]) -> str:
+    """Full local date + time for operational tickets: '05.10.2026 · 18:36'."""
+    if not dt:
+        return "--.--.---- · --:--"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(TZ).strftime("%d.%m.%Y · %H:%M")
+
+
 # ---------------------------------------------------------------------------
 # Printing (PrintNode architecture – disabled until credentials are configured)
 # ---------------------------------------------------------------------------
@@ -1932,27 +1945,34 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     if ready_dt and ready_dt.tzinfo is None:
         ready_dt = ready_dt.replace(tzinfo=timezone.utc)
     scheduled = bool(ready_dt) and ready_dt.astimezone(TZ).date() != datetime.now(TZ).date()
-    # ---- 2. WHEN – the very large (4x) time is ALWAYS the effective ready/delivery time (never accepted_at) ----
-    when_label = "LIVRAISON DEMANDÉE" if delivery else "RETRAIT À"  # customer-requested time (delivery: 18 cols at 2x)
+    # ---- 2. WHEN – the customer's REQUESTED DAY + time, always with the full date (never confused with the day the
+    #         order was placed or accepted). The very large (4x) time is the effective ready/delivery time. --------
+    if o.get("requested_date"):  # scheduled order: the day the customer chose
+        rd = datetime.strptime(o["requested_date"], "%Y-%m-%d")
+        requested_day = f"{hours_mod.DAY_FR[hours_mod.DAYS[rd.weekday()]]} {rd.strftime('%d.%m.%Y')}"
+    else:  # same-day order: the day it was placed
+        requested_day = fmt_date(o.get("created_at"))
+    when_label = "LIVRAISON DEMANDÉE" if delivery else "RETRAIT DEMANDÉ"
     lines += ["-" * W]
     if scheduled:
-        # Future-day order: the DATE is the first thing the kitchen must see – never confused with today's tickets
-        lines += [mid("COMMANDE PROGRAMMEE"), mid("PAS POUR AUJOURD'HUI"), mid(fmt_date(ready_dt).upper())]
-        if requested and confirmed and confirmed != requested:
-            lines += [mid(f"DEMANDÉE {requested}"), mid(f"CONFIRMÉE {confirmed}")]
-        else:
-            lines += [mid(when_label)]
-        lines += [huge(confirmed or requested or "--:--")]
-    elif requested:
+        # Future-day order: the kitchen must see at once that it is NOT for today
+        lines += [mid("COMMANDE PROGRAMMEE"), mid("PAS POUR AUJOURD'HUI")]
+    lines += [mid(when_label), mid(requested_day.upper())]
+    if requested:
         if confirmed and confirmed != requested:
             # Staff changed the requested time: show both, the large one is the confirmed operational time
             lines += [mid(f"DEMANDÉE {requested}"), mid(f"CONFIRMÉE {confirmed}"), huge(confirmed)]
         else:
-            lines += [mid(when_label), huge(requested)]
+            lines += [huge(confirmed or requested)]
     else:
         lines += [mid("DÈS QUE POSSIBLE")]
         if confirmed:
             lines += [huge(confirmed)]
+    lines += ["=" * W]
+    # When the order was placed / accepted – full date + time, small, clearly separate from the requested day
+    lines += [f"Commande reçue :    {fmt_dt(o.get('created_at'))}"]
+    if o.get("accepted_at"):
+        lines += [f"Commande acceptée : {fmt_dt(o['accepted_at'])}"]
     lines += ["=" * W]
     # ---- 2. SOURCE --------------------------------------------------------------------------------------------
     src = f"TELEPHONE - POSTE {o.get('station') or 1}" if o.get("source") == "telephone" else {"web": "WEB", "ios": "APP IPHONE", "android": "APP ANDROID"}.get(o.get("source", "web"), o.get("source", "web").upper())
@@ -2015,9 +2035,9 @@ def build_ticket(o: dict, settings: Settings, reprint: bool = False) -> str:
     if (o.get("loyalty") or {}).get("discount"):
         lines.append(f"{'Carte Fidélité -50% pizza 32cm':<{W-10}}{('-CHF %.2f' % o['loyalty']['discount']):>10}")
     lines.append(f"{'TOTAL:':<{W-12}}{('CHF %.2f' % o['total']):>12}")
-    # Operational timestamps
+    # Operational timestamps – full date + time (orders can be placed on one day and accepted/prepared on another)
     stamps = [("Recue", o.get("created_at")), ("Acceptee", o.get("accepted_at")), ("Prete", o.get("ready_at")), ("Partie", o.get("out_for_delivery_at")), ("Livree", o.get("delivered_at"))]
-    lines += ["-" * W] + [f"{k + ':':<10}{fmt_time(v)}" for k, v in stamps if v]
+    lines += ["-" * W] + [f"{k + ':':<10}{fmt_dt(v)}" for k, v in stamps if v]
     lines += ["", c("Ticket operationnel - pas un recu fiscal"), ""]
     return "\n".join(lines)
 

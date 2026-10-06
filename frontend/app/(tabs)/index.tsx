@@ -8,7 +8,7 @@ import * as Haptics from "expo-haptics";
 import Animated, { FadeInDown } from "react-native-reanimated";
 import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
-import { imgUri, useMenu } from "@/src/api";
+import { imgUri, useMenu, useOrderingStatus } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { ProductCard } from "@/src/components/product-card";
 import { Button, Empty, FONT_DISPLAY, FONT_TEXT } from "@/src/components/ui";
@@ -121,6 +121,7 @@ export default function MenuScreen() {
   };
 
   const settings = data?.settings;
+  const { data: ordering } = useOrderingStatus();
   // Real photography: the Quattro Formaggi main photo (uploaded in admin) is the hero image
   const heroProduct = data?.products.find((p) => p.name.fr === "Quattro Formaggi") ?? data?.products[0];
 
@@ -166,6 +167,11 @@ export default function MenuScreen() {
                   <View style={styles.closedBanner} testID="closed-banner">
                     <Feather name="alert-circle" size={16} color={colors.onError} />
                     <Text style={styles.closedText}>{t("closedNow")}</Text>
+                  </View>
+                ) : ordering?.closed_today ? (
+                  <View style={styles.closedBanner} testID="closed-today-banner">
+                    <Feather name="clock" size={16} color={colors.onError} />
+                    <Text style={styles.closedText}>{t("closedToday")}</Text>
                   </View>
                 ) : null}
                 {(data?.settings.hero_images?.length ?? 0) > 0 ? <HeroCarousel images={data!.settings.hero_images!} onPress={orderNow} /> : null}

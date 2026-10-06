@@ -9,6 +9,14 @@ from typing import Dict, List, Optional, Tuple
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 DAY_FR = {"mon": "lundi", "tue": "mardi", "wed": "mercredi", "thu": "jeudi", "fri": "vendredi", "sat": "samedi", "sun": "dimanche"}
 DEFAULT_LEAD = 15
+# Fully closed calendar day (no opening window configured for that weekday): no customer order at all that day –
+# not even for a future day. Ordering reopens automatically with the next open day's normal rules.
+CLOSED_TODAY_FR = "Restaurant fermé aujourd'hui. Les commandes seront de nouveau disponibles à la prochaine ouverture."
+
+
+def closed_all_day(settings, now: datetime) -> bool:
+    """True when the opening hours (source of truth) contain no window for the current calendar day."""
+    return not windows(settings.opening_hours or {}, DAYS[now.weekday()])
 
 
 def lead_minutes(settings) -> int:
@@ -101,11 +109,14 @@ def ordering_status(settings, now: datetime, step: int = 15) -> dict:
                 fdl = first_delivery_for(fd, (a, b))
                 asap_delivery = fdl is not None and fdl <= b - cutoff
                 break
+    closed_today = closed_all_day(settings, now)
     return {"open_now": pickup_open, "pickup_open": pickup_open, "delivery_open": delivery_open,
             "asap_pickup": asap_pickup, "asap_delivery": asap_delivery, "asap_from": _fmt(asap_from) if asap_from is not None else None,
             "delivery_from": _fmt(delivery_from) if delivery_from is not None else None, "next_open": next_open,
             "pickup_slots": pickup_slots, "delivery_slots": delivery_slots, "day": day,
-            "days": upcoming_days(settings, now, step)}
+            # fully closed day: no scheduled days offered at all (no "tomorrow"), see CLOSED_TODAY_FR
+            "closed_today": closed_today,
+            "days": [] if closed_today else upcoming_days(settings, now, step)}
 
 
 def slots_for_day(settings, day_date, now: datetime, step: int = 15) -> Tuple[List[str], List[str]]:

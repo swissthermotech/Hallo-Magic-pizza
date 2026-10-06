@@ -70,6 +70,8 @@ export default function CheckoutScreen() {
   const asapAvailable = !ordering || (type === "pickup" ? ordering.asap_pickup ?? ordering.pickup_open : ordering.asap_delivery ?? ordering.delivery_open);
   const asapFrom = ordering && !ordering.pickup_open ? ordering.asap_from : null;
   const closedNow = !!ordering && !ordering.pickup_open && !ordering.asap_pickup;
+  // Fully closed calendar day (opening hours): no order at all today – not even for a future day (server enforces it too)
+  const closedToday = !!ordering?.closed_today;
   useEffect(() => {
     if (!asapAvailable && timeMode === "asap") setTimeMode("scheduled");
   }, [asapAvailable, timeMode]);
@@ -109,9 +111,14 @@ export default function CheckoutScreen() {
   const requestedTime = timeMode === "asap" ? "asap" : time;
 
   const valid =
+    !closedToday &&
     f.first_name.trim() && f.phone.trim() && emailOk && (timeMode === "asap" ? asapAvailable : !!time && slots.includes(time)) && (type === "pickup" || (f.street.trim() && f.npa.trim() && f.city.trim() && !zoneMissing)) && (!cart.hasAlcohol || ageOk) && !belowMin && cart.items.length > 0;
 
   const submit = async () => {
+    if (closedToday) {
+      toast.show(t("closedToday"), "error");
+      return;
+    }
     if (!valid) {
       toast.show(cart.hasAlcohol && !ageOk ? t("ageRequired") : !emailOk && f.first_name.trim() && f.phone.trim() ? t("invalidEmail") : t("required"), "error");
       return;
@@ -159,7 +166,12 @@ export default function CheckoutScreen() {
         {/* Time */}
         <View>
           <Text style={styles.sectionTitle}>{t("desiredTime")}</Text>
-          {closedNow ? (
+          {closedToday ? (
+            <View style={styles.closedBox} testID="checkout-closed-today">
+              <Feather name="clock" size={16} color={colors.onError} />
+              <Text style={styles.closedText}>{t("closedToday")}{ordering?.next_open ? ` · ${t("nextOpening")}: ${ordering.next_open}` : ""}</Text>
+            </View>
+          ) : closedNow ? (
             <View style={styles.closedBox} testID="checkout-closed">
               <Feather name="clock" size={16} color={colors.onError} />
               <Text style={styles.closedText}>{t("restaurantClosed")}{ordering?.next_open ? ` · ${t("nextOpening")}: ${ordering.next_open}` : ""}</Text>
@@ -174,6 +186,7 @@ export default function CheckoutScreen() {
           ) : type === "delivery" && ordering?.delivery_from ? (
             <Text style={styles.hint} testID="checkout-delivery-from">{t("earliestDelivery")}: {ordering.delivery_from}</Text>
           ) : null}
+          {closedToday ? null : (
           <View style={[styles.segment, { marginBottom: 12 }]} testID="time-mode-segment">
             <Pressable testID="time-mode-asap" disabled={!asapAvailable} onPress={() => setTimeMode("asap")} style={[styles.segBtn, { height: 44 }, timeMode === "asap" && styles.segBtnActive, !asapAvailable && { opacity: 0.4 }]}>
               <Feather name="zap" size={16} color={timeMode === "asap" ? colors.onSurfaceInverse : colors.onSurface} />
@@ -184,7 +197,8 @@ export default function CheckoutScreen() {
               <Text style={[styles.segText, { fontSize: 13 }, timeMode === "scheduled" && styles.segTextActive]}>{t("chooseTime")}</Text>
             </Pressable>
           </View>
-          {timeMode === "scheduled" ? (
+          )}
+          {timeMode === "scheduled" && !closedToday ? (
             <>
               {days.length > 1 ? (
                 <View style={[styles.slots, { marginBottom: 10 }]} testID="day-picker">
@@ -307,7 +321,7 @@ export default function CheckoutScreen() {
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
         <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
           <View style={{ width: "100%", maxWidth: 760, gap: 6 }}>
-            <Button title={`${t("confirmOrder")} · ${chf(total)}`} size="lg" icon="check" onPress={submit} loading={place.isPending} testID="confirm-order-button" />
+            <Button title={closedToday ? t("restaurantClosed") : `${t("confirmOrder")} · ${chf(total)}`} size="lg" icon={closedToday ? "clock" : "check"} onPress={submit} disabled={closedToday} loading={place.isPending} testID="confirm-order-button" />
             <Text style={styles.ctaHint}>{type === "pickup" ? t("payAtPickup") : t("payAtDelivery")}</Text>
           </View>
         </View>
