@@ -10,6 +10,7 @@ import { useDriverAction, useDriverOrders } from "@/src/api";
 import { useStaff } from "@/src/staff-auth";
 import { chf, fmtTime, statusTone } from "@/src/format";
 import { Badge, Button, Empty, FONT_DISPLAY, FONT_TEXT, useToast } from "@/src/components/ui";
+import { DriverItems } from "@/src/components/driver-items";
 import type { Order } from "@/src/types";
 
 /** /driver – phone screen for Livreur 1/2/3. Shows ONLY the deliveries assigned to the logged-in driver number.
@@ -122,8 +123,10 @@ function DeliveryCard({ o, focus, onAction, onMap, busy, compact }: { o: Order; 
         <Text style={styles.addr}>{a.npa} {a.city}</Text>
         {a.instructions ? <Text style={styles.note}>ℹ {a.instructions}</Text> : null}
         {o.general_note ? <Text style={styles.note}>NOTE: {o.general_note}</Text> : null}
-        <Text style={styles.hint}>{o.items.map((i) => `${i.quantity}x ${i.name.fr}${i.size ? ` ${i.size.label}` : ""}`).join(", ")} · {t("total")} {chf(o.total)}</Text>
       </View>
+      {/* Pizzas – one separated block per line (qty + size + name, modifications indented underneath) */}
+      <DriverItems items={o.items} orderId={o.id} />
+      <Text style={styles.hint}>{o.items.reduce((n, i) => n + i.quantity, 0)} {t("mgrItems").toLowerCase()} · {t("total")} {chf(o.total)}</Text>
       <Button title={t("openMap")} icon="navigation" variant="outline" onPress={() => onMap(o)} testID={`driver-map-${o.id}`} />
 
       {/* Flow: Assigned → PARTI / EN LIVRAISON → payment confirmation → LIVRÉE */}
