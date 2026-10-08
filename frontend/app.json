@@ -23,7 +23,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000000"
+        "backgroundColor": "#D00100"
       },
       "package": "com.emergent.hallomagictest.jectz0",
       "permissions": [
