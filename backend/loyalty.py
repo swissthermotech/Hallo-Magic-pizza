@@ -106,6 +106,13 @@ async def reserve(db, info: dict) -> bool:
     return res.matched_count == 1
 
 
+async def release(db, info: Optional[dict]) -> None:
+    """Undo `reserve` for an order that was computed but NOT stored (duplicate submission detected after pricing)."""
+    r = int((info or {}).get("rewards_applied", 0))
+    if r > 0:
+        await db.loyalty.update_one({"_id": info["user_id"], "reserved": {"$gte": r}}, {"$inc": {"reserved": -r}, "$set": {"updated_at": _now()}})
+
+
 async def finalize(db, order: dict, outcome: str) -> None:
     """Called when an order reaches `completed` or `cancelled`. Idempotent: the order's loyalty block is claimed
     atomically first, so a retried / duplicated status call can never add stamps or consume a reward twice."""

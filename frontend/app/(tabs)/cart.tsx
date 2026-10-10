@@ -1,4 +1,4 @@
-import React, { useContext, useRef } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
@@ -10,6 +10,7 @@ import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { imgUri, useMenu } from "@/src/api";
 import { lineTotal, useCart } from "@/src/cart";
+import { LastOrder, loadLastOrder } from "@/src/last-order";
 import { chf } from "@/src/format";
 import { Button, Empty, Field, FONT_DISPLAY, FONT_TEXT, Stepper } from "@/src/components/ui";
 
@@ -32,12 +33,24 @@ export default function CartScreen() {
   maxBottomInset.current = Math.max(maxBottomInset.current, insets.bottom);
   const bottomInset = classicTabBar ? 0 : maxBottomInset.current;
 
+  // Last successful order (3 h): after a refresh / app restart the customer finds the confirmation again here instead
+  // of re-ordering the same pizzas
+  const [lastOrder, setLastOrder] = useState<LastOrder | null>(null);
+  useEffect(() => { loadLastOrder().then(setLastOrder); }, [cart.items.length]);
+
   return (
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
         <Text style={styles.title} testID="cart-title">{t("cart")}</Text>
         {cart.items.length > 0 ? <Text style={styles.count}>{cart.count} {t("items").toLowerCase()}</Text> : null}
       </View>
+      {lastOrder ? (
+        <Pressable onPress={() => router.push({ pathname: "/order/[id]", params: { id: lastOrder.id } })} style={styles.lastOrder} testID="cart-last-order-banner">
+          <Feather name="check-circle" size={18} color={colors.onSuccess} />
+          <Text style={styles.lastOrderText}>{t("lastOrderBanner").replace("{n}", String(lastOrder.number))}</Text>
+          <Text style={styles.lastOrderLink}>{t("lastOrderSee")}</Text>
+        </Pressable>
+      ) : null}
 
       {cart.items.length === 0 ? (
         <Empty icon="shopping-bag" title={t("emptyCart")} hint={t("emptyCartHint")} action={<Button title={t("browseMenu")} onPress={() => router.push("/(tabs)")} testID="cart-browse-menu-button" />} />
@@ -141,4 +154,7 @@ const useStyles = makeStyles((colors) => ({
   totalValue: { fontFamily: FONT_DISPLAY, fontSize: 26, color: colors.onSurfaceInverse },
   paymentHint: { fontFamily: FONT_TEXT, fontSize: 12, color: colors.onSurfaceInverse, opacity: 0.7, marginTop: 4 },
   cta: { position: "absolute", left: 0, right: 0, bottom: 0, alignItems: "center", paddingHorizontal: 16, paddingTop: 12, backgroundColor: colors.surface, borderTopWidth: 1, borderTopColor: colors.border },
+  lastOrder: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginBottom: 8, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 12, backgroundColor: colors.success },
+  lastOrderText: { flex: 1, fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "700", color: colors.onSuccess },
+  lastOrderLink: { fontFamily: FONT_TEXT, fontSize: 14, fontWeight: "800", color: colors.onSuccess, textDecorationLine: "underline" },
 }));

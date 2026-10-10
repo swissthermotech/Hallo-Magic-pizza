@@ -7,6 +7,7 @@ from typing import List, Optional, Dict, Any, Annotated, Literal
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 import os
 import asyncio
 import re
@@ -373,6 +374,9 @@ class OrderIn(BaseModel):
     language: str = "fr"
     payment_method: str = "cash"  # how the customer will pay at handover: "cash" (ESPÈCES) | "terminal" (CARTE) – no online payment
     marketing_consent: bool = False  # optional e-mail offers opt-in ticked at checkout (never required, unchecked by default)
+    # Idempotency key generated ONCE per checkout attempt by the client (double tap / retry / lost response / refresh
+    # with the same key -> the EXISTING order is returned, never a second order number, ticket or Fidelité hold)
+    client_order_id: Optional[str] = Field(default=None, max_length=80)
 
 
 PAYMENT_METHODS = {
@@ -622,6 +626,10 @@ async def seed():
     except Exception:
         pass
     await db.orders.create_index("client_request_id", unique=True, partialFilterExpression={"client_request_id": {"$type": "string"}})
+    # Idempotency key for customer checkouts (Web / iOS / Android): unique only when present
+    await db.orders.create_index("client_order_id", unique=True, partialFilterExpression={"client_order_id": {"$type": "string"}})
+    await db.orders.create_index([("checkout_fingerprint", 1), ("created_at", -1)])
+    await db.checkout_claims.create_index("at", expireAfterSeconds=86400)  # claims are only needed for a day
     try:
         photos_mod.init_storage()
     except Exception as e:  # storage unavailable -> uploads will retry lazily
@@ -1184,6 +1192,39 @@ async def compute_order_reserving_loyalty(body: OrderIn, user: Optional[dict], *
     raise HTTPException(409, "Carte Fidélité en cours de mise à jour – veuillez réessayer")
 
 
+def checkout_fingerprint(body: OrderIn) -> str:
+    """Canonical fingerprint of a customer checkout (fallback dedupe for clients without client_order_id):
+    phone · pickup/delivery · items (product, qty, size, options, removed ingredients, extras, note) · requested
+    date/time · delivery address · payment method. The total is compared separately after pricing."""
+    import hashlib
+    import json
+    items = sorted(
+        [it.product_id, it.quantity, it.size_key or "", sorted(it.option_keys), sorted(it.removed_ingredient_ids),
+         sorted([e.extra_id, e.quantity] for e in it.extras), (it.note or "").strip()]
+        for it in body.items)
+    addr = [body.address.street.strip().lower(), body.address.number.strip(), body.address.npa.strip(), body.address.city.strip().lower()] if body.type == "delivery" and body.address else None
+    key = [auth_mod.normalize_phone(body.customer.phone), body.type, items, body.requested_date or "", body.requested_time or "asap", addr, body.payment_method]
+    return hashlib.sha256(json.dumps(key, ensure_ascii=False).encode()).hexdigest()
+
+
+FALLBACK_DEDUPE_WINDOW = timedelta(minutes=3)
+
+
+async def _claim_checkout(cid: str) -> Optional[dict]:
+    """Atomically claim a client_order_id. Returns None when this request owns the key (go ahead and create the
+    order) or the EXISTING order when another request with the same key already created / is creating it."""
+    try:
+        await db.checkout_claims.insert_one({"_id": cid, "at": now_utc()})
+        return None
+    except DuplicateKeyError:
+        for _ in range(40):  # the other request may still be pricing/inserting: wait up to ~8 s for its order
+            dup = await db.orders.find_one({"client_order_id": cid})
+            if dup:
+                return dup
+            await asyncio.sleep(0.2)
+        raise HTTPException(409, "Commande en cours de création – veuillez patienter un instant")
+
+
 @api.post("/orders", response_model=Order)
 async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.optional_user)):
     # Customer Web/App checkout: e-mail is mandatory (order follow-up + review request); phone orders (staff) are not affected
@@ -1193,13 +1234,41 @@ async def create_order(body: OrderIn, user: Optional[dict] = Depends(auth_mod.op
     body.customer.email = email
     if body.payment_method not in ("cash", "terminal", "pay_at_pickup", "pay_at_delivery"):
         raise HTTPException(400, "Invalid payment method")
-    order = await compute_order_reserving_loyalty(body, user)
-    if body.payment_method in ("cash", "terminal"):
-        order.payment_method = body.payment_method  # drives ticket "A ENCAISSER · ESPECES/TERMINAL", driver screen and Clôture buckets
-    doc = order.to_mongo()
-    doc["marketing_consent"] = bool(body.marketing_consent)
-    doc.update(collection_fields(order.payment_method, order.total))
-    res = await db.orders.insert_one(doc)
+    # 1) Idempotency: the same checkout attempt (same client_order_id) always returns the order it already created –
+    #    double tap, timeout, lost response, refresh: ONE order, ONE order number, ONE ticket, ONE Fidélité hold.
+    cid = (body.client_order_id or "").strip() or None
+    if cid:
+        dup = await _claim_checkout(cid)
+        if dup:
+            return Order.from_mongo(dup)
+    fingerprint = checkout_fingerprint(body)
+    try:
+        # priced WITHOUT an order number: a duplicate must never consume one
+        order = await compute_order_reserving_loyalty(body, user, allocate_number=False)
+        if body.payment_method in ("cash", "terminal"):
+            order.payment_method = body.payment_method  # drives ticket "A ENCAISSER · ESPECES/TERMINAL", driver screen and Clôture buckets
+        gross = round(order.total + (order.loyalty.discount if order.loyalty else 0.0), 2)  # total before the Fidélité discount
+        # 2) Fallback for clients that do not send client_order_id yet (public customer endpoint ONLY – never phone /
+        #    staff orders): an EXACT repeat of the same checkout (fingerprint + total) within 3 minutes is the same submission.
+        if not cid:
+            dup = await db.orders.find_one({"checkout_fingerprint": fingerprint, "checkout_gross_total": gross,
+                                            "created_at": {"$gte": now_utc() - FALLBACK_DEDUPE_WINDOW}}, sort=[("created_at", -1)])
+            if dup:
+                await loyalty_mod.release(db, order.loyalty.model_dump() if order.loyalty else None)
+                logger.info("Duplicate checkout (fallback) -> returning order #%s", dup.get("order_number"))
+                return Order.from_mongo(dup)
+        order.order_number = await next_order_number()
+        doc = order.to_mongo()
+        doc["marketing_consent"] = bool(body.marketing_consent)
+        doc["client_order_id"] = cid
+        doc["checkout_fingerprint"] = fingerprint
+        doc["checkout_gross_total"] = gross
+        doc.update(collection_fields(order.payment_method, order.total))
+        res = await db.orders.insert_one(doc)
+    except Exception:
+        if cid:  # creation failed (validation, closed day, 409 …) -> free the key so the same checkout can retry
+            await db.checkout_claims.delete_one({"_id": cid})
+        raise
     if user and body.save_address and body.type == "delivery" and body.address:
         await auth_mod.save_address_for_user(user, body.address.model_dump())
     if body.marketing_consent:  # explicit opt-in only – an unticked box never changes an existing consent

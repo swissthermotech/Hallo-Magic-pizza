@@ -16,6 +16,18 @@ import hours as hm  # noqa: E402
 import server  # noqa: E402
 from server import TZ, CustomerIn, OrderIn, OrderItemIn, db  # noqa: E402
 
+def _run(coro):
+    """Run a coroutine on the module's event loop (each test file is run on its own: pytest tests/<file> -n 0)."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_closed():
+            raise RuntimeError
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
+
+
 HOURS = {"mon": "", "tue": "17:00-22:00", "wed": "11:00-14:00, 17:00-22:00", "thu": "11:00-14:00, 17:00-22:00",
          "fri": "11:00-14:00, 17:00-22:00", "sat": "11:00-14:00, 17:00-22:00", "sun": "11:00-14:00, 17:00-22:00"}
 S = SimpleNamespace(opening_hours=HOURS, delivery_cutoff_minutes=15, min_lead_minutes=15, first_delivery={"lunch": "", "evening": ""})
@@ -65,7 +77,7 @@ async def _compute(body, enforce_hours=True):
 
 
 def _body(**kw):
-    marg = asyncio.get_event_loop().run_until_complete(db.products.find_one({"name.fr": "Margherita"}))
+    marg = _run(db.products.find_one({"name.fr": "Margherita"}))
     base = dict(type="pickup", items=[OrderItemIn(product_id=str(marg["_id"]), quantity=1, size_key="32")],
                 customer=CustomerIn(first_name="Closed", phone="079 555 01 04", email="c@example.com"), requested_time="asap", age_confirmed=True)
     base.update(kw)
@@ -75,7 +87,7 @@ def _body(**kw):
 def test_requires_orders_rejected_server_side_on_closed_day(monkeypatch):
     """Server-side rule: whatever the client sends (ASAP, exact time, or a FUTURE date), a customer order is refused
     while the current calendar day is fully closed. Staff phone orders (enforce_hours=False) are unaffected."""
-    real_settings = asyncio.get_event_loop().run_until_complete(server.get_settings())
+    real_settings = _run(server.get_settings())
     today = hm.DAYS[datetime.now(TZ).weekday()]
     closed = real_settings.model_copy(update={"opening_hours": {**real_settings.opening_hours, today: ""}})
 
@@ -89,26 +101,26 @@ def test_requires_orders_rejected_server_side_on_closed_day(monkeypatch):
                         ("tomorrow (valid slot)", _body(requested_time=p_slots[0] if p_slots else "19:00", requested_date=tomorrow.isoformat())),
                         ("in 3 days", _body(requested_time="19:00", requested_date=(tomorrow + timedelta(days=2)).isoformat()))]:
         with pytest.raises(server.HTTPException) as e:
-            asyncio.get_event_loop().run_until_complete(_compute(body))
+            _run(_compute(body))
         assert e.value.status_code == 400 and e.value.detail == hm.CLOSED_TODAY_FR, label
     # staff override path (phone orders) still computes
-    o = asyncio.get_event_loop().run_until_complete(_compute(_body(requested_time="19:30"), enforce_hours=False))
+    o = _run(_compute(_body(requested_time="19:30"), enforce_hours=False))
     assert o.total == 14.0
 
 
 def test_requires_open_day_scheduled_order_still_works():
     """Normal open day (sandbox settings, today): a scheduled order for the next open day with a proposed slot computes."""
-    settings = asyncio.get_event_loop().run_until_complete(server.get_settings())
+    settings = _run(server.get_settings())
     now = datetime.now(TZ)
     if hm.closed_all_day(settings, now):
         pytest.skip("sandbox is on a closed day right now")
     days = hm.ordering_status(settings, now)["days"]
     future = next(d for d in days if not d["is_today"])
-    o = asyncio.get_event_loop().run_until_complete(_compute(_body(requested_time=future["pickup_slots"][5], requested_date=future["date"])))
+    o = _run(_compute(_body(requested_time=future["pickup_slots"][5], requested_date=future["date"])))
     assert o.requested_date == future["date"] and o.requested_time == future["pickup_slots"][5] and o.total == 14.0
     # ...and a slot that is not proposed is still refused (unchanged rule)
     with pytest.raises(server.HTTPException):
-        asyncio.get_event_loop().run_until_complete(_compute(_body(requested_time="03:15", requested_date=future["date"])))
+        _run(_compute(_body(requested_time="03:15", requested_date=future["date"])))
 
 
 def _utc(y, mo, d, h, mi):
@@ -126,7 +138,7 @@ def _order(**kw):
 
 
 def test_requires_ticket_shows_requested_date_received_and_accepted():
-    settings = asyncio.get_event_loop().run_until_complete(server.get_settings())
+    settings = _run(server.get_settings())
     t = server.strip_escpos(server.build_ticket(_order(), settings))
     lines = [l.strip() for l in t.splitlines()]
     assert "LIVRAISON DEMANDÉE" in lines and "MARDI 06.10.2026" in lines and "19:15" in lines
@@ -144,7 +156,7 @@ def test_requires_ticket_shows_requested_date_received_and_accepted():
 
 
 def test_requires_ticket_same_day_and_asap_orders_carry_their_date():
-    settings = asyncio.get_event_loop().run_until_complete(server.get_settings())
+    settings = _run(server.get_settings())
     # same-day exact time: requested day = day the order was placed
     same = _order(created_at=_utc(2026, 10, 7, 11, 2), accepted_at=_utc(2026, 10, 7, 11, 5), requested_date=None, requested_time="12:30",
                   estimated_ready_at=_utc(2026, 10, 7, 12, 30), scheduled_for=None, type="pickup")

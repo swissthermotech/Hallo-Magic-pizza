@@ -86,7 +86,7 @@ async function toApiError(res: Response, path: string): Promise<ApiError> {
 
 export const api = {
   get: <T>(p: string) => request<T>(p),
-  post: <T>(p: string, body?: unknown) => request<T>(p, { method: "POST", body: JSON.stringify(body ?? {}) }),
+  post: <T>(p: string, body?: unknown, init?: RequestInit) => request<T>(p, { method: "POST", body: JSON.stringify(body ?? {}), ...(init || {}) }),
   put: <T>(p: string, body: unknown) => request<T>(p, { method: "PUT", body: JSON.stringify(body) }),
   patch: <T>(p: string, body: unknown) => request<T>(p, { method: "PATCH", body: JSON.stringify(body) }),
   del: <T>(p: string, body?: unknown) => request<T>(p, { method: "DELETE", ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }),
@@ -179,13 +179,21 @@ export interface PlaceOrderPayload {
   language: string;
   payment_method: "cash" | "terminal"; // how the customer will pay at handover (no online payment)
   marketing_consent?: boolean; // optional e-mail offers opt-in (unchecked by default)
+  client_order_id: string; // idempotency key – ONE per checkout attempt, reused on every retry of that attempt
 }
 
-export function usePlaceOrder() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (p: PlaceOrderPayload) =>
-      api.post<Order>("/orders", {
+const PLACE_TIMEOUT_MS = 30_000;
+const PLACE_ATTEMPTS = 3;
+
+/** POST /orders with the checkout's idempotency key. A lost response / timeout / network error is retried with the
+ *  SAME client_order_id: the server then returns the order it already created instead of a second one. */
+async function placeOrderOnce(p: PlaceOrderPayload): Promise<Order> {
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= PLACE_ATTEMPTS; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), PLACE_TIMEOUT_MS);
+    try {
+      return await api.post<Order>("/orders", {
         type: p.type,
         source: SOURCE,
         items: cartItemsPayload(p.items),
@@ -199,7 +207,25 @@ export function usePlaceOrder() {
         language: p.language,
         payment_method: p.payment_method,
         marketing_consent: !!p.marketing_consent,
-      }),
+        client_order_id: p.client_order_id,
+      }, { signal: ctrl.signal });
+    } catch (e: any) {
+      lastErr = e;
+      // 4xx answers (400 closed day, 409 …) are final; transport problems (timeout, offline, lost response) and
+      // gateway errors (502/504 – the order may or may not exist) retry with the SAME key
+      if (e && typeof e.status === "number" && e.status < 500) throw e;
+      if (attempt < PLACE_ATTEMPTS) await new Promise((r) => setTimeout(r, 1500));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("Connexion perdue – veuillez réessayer");
+}
+
+export function usePlaceOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: placeOrderOnce,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["orders"] });
       qc.invalidateQueries({ queryKey: ["loyalty"] });
@@ -385,7 +411,7 @@ export async function fetchMarketingCsv(): Promise<string> {
 }
 
 // ---- Phone orders (staff iPads) ----
-export interface PhoneOrderPayload extends Omit<PlaceOrderPayload, "payment_method"> {
+export interface PhoneOrderPayload extends Omit<PlaceOrderPayload, "payment_method" | "client_order_id"> {
   station: number;
   payment_method: string;
   customer_id?: string | null;

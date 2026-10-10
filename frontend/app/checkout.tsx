@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,6 +10,7 @@ import { useI18n } from "@/src/i18n";
 import { useLoyaltyQuote, useMenu, usePlaceOrder } from "@/src/api";
 import { useCart } from "@/src/cart";
 import { useOrderingStatus } from "@/src/api";
+import { newClientOrderId, saveLastOrder } from "@/src/last-order";
 import { useAuth } from "@/src/auth";
 import { chf } from "@/src/format";
 import { Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
@@ -72,6 +73,9 @@ export default function CheckoutScreen() {
   const closedNow = !!ordering && !ordering.pickup_open && !ordering.asap_pickup;
   // Fully closed calendar day (opening hours): no order at all today – not even for a future day (server enforces it too)
   const closedToday = !!ordering?.closed_today;
+  // Idempotency key: ONE per checkout attempt. Every retry of this checkout (double tap, timeout, lost response)
+  // reuses it, so the server can only ever create one order for it. A new key is drawn after a successful order.
+  const clientOrderId = useRef(newClientOrderId());
   useEffect(() => {
     if (!asapAvailable && timeMode === "asap") setTimeMode("scheduled");
   }, [asapAvailable, timeMode]);
@@ -136,7 +140,10 @@ export default function CheckoutScreen() {
         age_confirmed: ageOk,
         save_address: !!user && type === "delivery" && !savedAddrId && saveAddress,
         language: lang,
+        client_order_id: clientOrderId.current,
       });
+      clientOrderId.current = newClientOrderId(); // this attempt is done – the next checkout is a new one
+      await saveLastOrder(order.id, order.order_number); // refresh / reopen -> "voir ma commande" instead of re-ordering
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       cart.addMyOrder(order.id);
       cart.clear();
