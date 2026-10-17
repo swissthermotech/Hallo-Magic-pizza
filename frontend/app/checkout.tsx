@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { KeyboardAwareScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
+import { KeyboardAwareScrollView, KeyboardStickyView, useKeyboardState, type KeyboardAwareScrollViewRef } from "react-native-keyboard-controller";
 import { Feather } from "@react-native-vector-icons/feather";
 import * as Haptics from "expo-haptics";
 import { makeStyles, useTheme } from "@/src/theme";
@@ -14,6 +14,7 @@ import { newClientOrderId, saveLastOrder } from "@/src/last-order";
 import { useAuth } from "@/src/auth";
 import { chf } from "@/src/format";
 import { Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
+import { OrderTypeBanner, SummaryRow, WEEKDAYS } from "@/src/components/order-type-summary";
 import { OrderTypeSelector } from "./(tabs)/index";
 import type { OrderType } from "@/src/types";
 
@@ -27,11 +28,6 @@ function timeSlots(): string[] {
   }
   return out;
 }
-
-const WEEKDAYS = {
-  fr: ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"],
-  de: ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"],
-};
 
 export default function CheckoutScreen() {
   const styles = useStyles();
@@ -155,11 +151,29 @@ export default function CheckoutScreen() {
   };
 
   const CTA_H = 110 + insets.bottom;
+  // The sticky bar now carries the order-type summary -> measure its real height for the scroll padding / keyboard offset
+  const [ctaH, setCtaH] = useState(CTA_H);
+  const keyboardOpen = useKeyboardState((s) => s.isVisible);
+  // "Modifier" links of the summary scroll back to the section concerned (same screen – cart and form untouched)
+  const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
+  const sectionY = useRef<{ time: number; customer: number; address: number }>({ time: 0, customer: 0, address: 0 });
+  const scrollToSection = (k: "time" | "address") => {
+    const y = k === "time" ? sectionY.current.time : sectionY.current.customer + sectionY.current.address;
+    scrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+  };
+  const addressText = [`${f.street.trim()} ${f.number.trim()}`.trim(), `${f.npa.trim()} ${f.city.trim()}`.trim()].filter(Boolean).join(", ");
+  const addressMissing = type === "delivery" && (!f.street.trim() || !f.npa.trim() || !f.city.trim());
+  const timeMissing = timeMode === "scheduled" && (!time || !slots.includes(time));
+  const whenText = closedToday
+    ? t("closedToday")
+    : timeMode === "asap"
+      ? `${t("today")} · ${t("asap")}${asapFrom ? ` (${asapFrom})` : ""}`
+      : `${day ? dayLabel(day) : t("today")} · ${time && slots.includes(time) ? time : t("chooseTime")}`;
 
   return (
     <View style={styles.screen}>
       <ScreenHeader title={t("checkout")} subtitle={`${cart.count} ${t("items").toLowerCase()} · ${chf(goods)}`} testID="checkout-title" />
-      <KeyboardAwareScrollView contentContainerStyle={{ padding: 16, paddingBottom: CTA_H + 16, gap: 20, width: "100%", maxWidth: 760, alignSelf: "center" }} bottomOffset={CTA_H + 16} showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScrollView ref={scrollRef} contentContainerStyle={{ padding: 16, paddingBottom: ctaH + 16, gap: 20, width: "100%", maxWidth: 760, alignSelf: "center" }} bottomOffset={ctaH + 16} showsVerticalScrollIndicator={false}>
         {/* Order type */}
         <OrderTypeSelector />
         {type === "delivery" && settings ? (
@@ -171,7 +185,7 @@ export default function CheckoutScreen() {
         ) : null}
 
         {/* Time */}
-        <View>
+        <View onLayout={(e) => { sectionY.current.time = e.nativeEvent.layout.y; }} testID="checkout-time-section">
           <Text style={styles.sectionTitle}>{t("desiredTime")}</Text>
           {closedToday ? (
             <View style={styles.closedBox} testID="checkout-closed-today">
@@ -230,7 +244,7 @@ export default function CheckoutScreen() {
         </View>
 
         {/* Customer */}
-        <View style={{ gap: 12 }}>
+        <View style={{ gap: 12 }} onLayout={(e) => { sectionY.current.customer = e.nativeEvent.layout.y; }}>
           <Text style={styles.sectionTitle}>{t("yourDetails")}</Text>
           <View style={styles.two}>
             <Field label={`${t("firstName")} *`} value={f.first_name} onChangeText={set("first_name")} style={{ flex: 1 }} testID="checkout-first-name" autoCapitalize="words" />
@@ -252,7 +266,7 @@ export default function CheckoutScreen() {
             </View>
           ) : null}
           {type === "delivery" ? (
-            <>
+            <View style={{ gap: 12 }} onLayout={(e) => { sectionY.current.address = e.nativeEvent.layout.y; }} testID="checkout-address-section">
               <View style={styles.two}>
                 <Field label={`${t("street")} *`} value={f.street} onChangeText={set("street")} style={{ flex: 3 }} testID="checkout-street" />
                 <Field label={t("number")} value={f.number} onChangeText={set("number")} style={{ flex: 1 }} testID="checkout-number" />
@@ -268,7 +282,7 @@ export default function CheckoutScreen() {
                   <Text style={styles.checkText}>{t("saveThisAddress")}</Text>
                 </Pressable>
               ) : null}
-            </>
+            </View>
           ) : null}
         </View>
 
@@ -326,8 +340,16 @@ export default function CheckoutScreen() {
       </KeyboardAwareScrollView>
 
       <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom }}>
-        <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]}>
-          <View style={{ width: "100%", maxWidth: 760, gap: 6 }}>
+        <View style={[styles.cta, { paddingBottom: insets.bottom + 12 }]} onLayout={(e) => setCtaH(e.nativeEvent.layout.height)}>
+          <View style={{ width: "100%", maxWidth: 760, gap: 8 }}>
+            {/* What exactly is about to be ordered – LIVRAISON (address + time) or RETRAIT SUR PLACE (time) – right above the button.
+                While the keyboard is open only the one-line version is shown so the form stays usable. */}
+            <OrderTypeBanner type={type} compact={keyboardOpen} detail={whenText} testID="checkout-type-summary">
+              {type === "delivery" ? (
+                <SummaryRow icon="map-pin" text={addressMissing ? t("addressMissing") : addressText} missing={addressMissing} onEdit={() => scrollToSection("address")} testID="checkout-summary-address" />
+              ) : null}
+              <SummaryRow icon="clock" text={whenText} missing={timeMissing && !closedToday} onEdit={() => scrollToSection("time")} testID="checkout-summary-time" />
+            </OrderTypeBanner>
             <Button title={closedToday ? t("restaurantClosed") : `${t("confirmOrder")} · ${chf(total)}`} size="lg" icon={closedToday ? "clock" : "check"} onPress={submit} disabled={closedToday} loading={place.isPending} testID="confirm-order-button" />
             <Text style={styles.ctaHint}>{type === "pickup" ? t("payAtPickup") : t("payAtDelivery")}</Text>
           </View>

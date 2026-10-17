@@ -7,10 +7,11 @@ import Animated, { FadeIn } from "react-native-reanimated";
 import { makeStyles, useTheme } from "@/src/theme";
 import { statusLabel, useI18n } from "@/src/i18n";
 import { useOrder } from "@/src/api";
-import { chf, fmtTime, minutesUntil, statusTone } from "@/src/format";
+import { chf, fmtDate, fmtTime, minutesUntil, statusTone } from "@/src/format";
 import { Badge, Button, FONT_DISPLAY, FONT_TEXT, ScreenHeader } from "@/src/components/ui";
 import { OrderTracker } from "@/src/components/order-tracker";
 import { OrderLines } from "@/src/components/order-lines";
+import { fmtRequestedDate, OrderTypeBanner, SummaryRow } from "@/src/components/order-type-summary";
 
 export default function OrderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -45,11 +46,25 @@ export default function OrderScreen() {
   const pending = o.status === "pending";
   const cancelled = o.status === "cancelled";
   const requested = o.requested_time && o.requested_time !== "asap" ? o.requested_time : null;
+  const l = lang === "de" ? "de" : "fr";
+  // Requested date/time as the customer chose it (the confirmed time, once accepted, is in the hero below)
+  const requestedWhen = requested
+    ? `${o.requested_date ? fmtRequestedDate(o.requested_date, l) : fmtDate(o.created_at)} · ${requested}`
+    : `${fmtDate(o.created_at)} · ${t("asap")}`;
 
   return (
     <View style={styles.screen}>
       <ScreenHeader title={`${t("orderNumber")} #${o.order_number}`} subtitle={`${o.type === "pickup" ? t("pickup") : t("delivery")} · ${fmtTime(o.created_at)}`} testID="order-title" right={<Badge label={statusLabel(o.status, o.type, t)} tone={statusTone(o.status)} testID="order-status-badge" />} />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24, gap: 16 }}>
+        {/* The order type, repeated unmistakably: LIVRAISON (with address) or RETRAIT SUR PLACE + number, requested time, total, status */}
+        <OrderTypeBanner type={o.type} testID="order-type-summary">
+          <SummaryRow icon="hash" text={`${t("orderNumber")} #${o.order_number}`} testID="order-summary-number" />
+          <SummaryRow icon="clock" text={`${o.type === "pickup" ? t("requestedPickup") : t("requestedDelivery")}: ${requestedWhen}`} testID="order-summary-when" />
+          {o.type === "delivery" && o.address ? <SummaryRow icon="map-pin" text={`${o.address.street} ${o.address.number}`.trim() + `, ${o.address.npa} ${o.address.city}`} testID="order-summary-address" /> : null}
+          <SummaryRow icon="credit-card" text={`${t("total")}: ${chf(o.total)}`} testID="order-summary-total" />
+          <SummaryRow icon="activity" text={`${t("currentStatus")}:`} right={<Badge label={statusLabel(o.status, o.type, t)} tone={statusTone(o.status)} testID="order-summary-status" />} testID="order-summary-status-row" />
+        </OrderTypeBanner>
+
         {/* ETA hero */}
         <Animated.View entering={FadeIn} style={[styles.hero, pending && styles.heroPending, cancelled && styles.heroCancel]} testID="order-eta-card">
           {cancelled ? (
