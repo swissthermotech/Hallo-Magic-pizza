@@ -7,7 +7,7 @@ import { useI18n } from "@/src/i18n";
 import { lineTotal, useCart } from "@/src/cart";
 import { chf } from "@/src/format";
 import { Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, Stepper } from "@/src/components/ui";
-import type { OrderAddress } from "./customer-panel";
+import type { OrderAddress } from "./address-fields";
 import type { Settings, User } from "@/src/types";
 
 export type PaymentMethod = "cash" | "terminal" | "pay_at_pickup" | "pay_at_delivery";

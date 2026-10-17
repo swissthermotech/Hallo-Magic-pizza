@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -9,11 +9,13 @@ import { useCustomerProfile, useSetCustomerMarketing } from "@/src/api";
 import { useStaff } from "@/src/staff-auth";
 import { chf, fmtDate, fmtTime, statusTone } from "@/src/format";
 import { sourceLabel } from "@/src/components/staff-order";
-import { Badge, Empty, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
+import { Badge, Button, Empty, FONT_DISPLAY, FONT_TEXT, ScreenHeader, useToast } from "@/src/components/ui";
 import { LoyaltyCard } from "@/src/components/loyalty-card";
 import { LoyaltyAdjust } from "@/src/components/loyalty-adjust";
+import { ChangesJournal, CustomerEditSheet, GuestToCustomerSheet } from "@/src/components/customer-edit";
 
-/** Customer profile (staff): identity, contact, addresses, statistics, marketing consent, complete order history. */
+/** Customer profile (staff): identity, contact, addresses, statistics, marketing consent, complete order history.
+ * Manager and phone staff may correct the file (name / phone / e-mail / saved addresses) – past orders are never rewritten. */
 export default function CustomerProfileScreen() {
   const { key } = useLocalSearchParams<{ key: string }>();
   const styles = useStyles();
@@ -25,6 +27,7 @@ export default function CustomerProfileScreen() {
   const { role } = useStaff();
   const { data: c, isLoading } = useCustomerProfile(key);
   const setMarketing = useSetCustomerMarketing();
+  const [editing, setEditing] = useState(false);
 
   if (isLoading || !c) {
     return (
@@ -36,12 +39,22 @@ export default function CustomerProfileScreen() {
   }
 
   const kindLabel = c.kind === "account" ? `★ ${t("accountBadge")}` : c.kind === "staff" ? t("phoneCustomer") : t("guest").toUpperCase();
+  const editable = c.kind !== "guest";
   const toggle = (v: boolean) =>
     setMarketing.mutateAsync({ key: c.key, consent: v }).then(() => toast.show(v ? t("marketingOn") : t("marketingOff"), "success")).catch((e) => toast.show(e.message, "error"));
 
   return (
     <View style={styles.screen}>
-      <ScreenHeader title={`${c.first_name} ${c.last_name}`.trim() || t("customerProfile")} subtitle={kindLabel} testID="customer-profile-title" />
+      <ScreenHeader
+        title={`${c.first_name} ${c.last_name}`.trim() || t("customerProfile")}
+        subtitle={kindLabel}
+        testID="customer-profile-title"
+        right={editable ? (
+          <Pressable testID="customer-edit-open" onPress={() => setEditing(true)} style={styles.iconBtn} accessibilityRole="button" accessibilityLabel={t("editCustomer")}>
+            <Feather name="edit-2" size={20} color={colors.onSurface} />
+          </Pressable>
+        ) : undefined}
+      />
       <ScrollView contentContainerStyle={{ padding: 16, gap: 16, paddingBottom: insets.bottom + 24 }}>
         {/* Identity & contact */}
         <View style={styles.card} testID="customer-profile-card">
@@ -50,7 +63,16 @@ export default function CustomerProfileScreen() {
           <Row label={t("phone")} value={c.phone || "—"} testID="customer-phone" />
           <Row label={t("email")} value={c.email || "—"} testID="customer-email" />
           <Row label={t("customerType")} value={kindLabel} testID="customer-kind" />
+          {editable ? (
+            <Button title={t("editCustomer")} variant="outline" icon="edit-2" onPress={() => setEditing(true)} style={{ marginTop: 6 }} testID="customer-edit-button" />
+          ) : c.key !== "anonymised" ? (
+            <View style={{ gap: 8, marginTop: 6 }}>
+              <Text style={styles.hint} testID="customer-guest-hint">{t("createCustomerFileHint")}</Text>
+              <Button title={t("createCustomerFile")} icon="user-plus" onPress={() => setEditing(true)} testID="customer-create-file" />
+            </View>
+          ) : null}
         </View>
+        {c.changes_audit?.length ? <View style={styles.card}><ChangesJournal entries={c.changes_audit} /></View> : null}
 
         {/* Statistics */}
         <View style={styles.statsRow}>
@@ -120,6 +142,11 @@ export default function CustomerProfileScreen() {
           </View>
         </View>
       </ScrollView>
+      {editable ? (
+        <CustomerEditSheet customerId={c.key} visible={editing} onClose={() => setEditing(false)} />
+      ) : c.key !== "anonymised" ? (
+        <GuestToCustomerSheet c={c} visible={editing} onClose={() => setEditing(false)} />
+      ) : null}
     </View>
   );
 }
@@ -147,6 +174,7 @@ function StatBox({ label, value, testID }: { label: string; value: string; testI
 const useStyles = makeStyles((colors) => ({
   screen: { flex: 1, backgroundColor: colors.surface },
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surfaceSecondary, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center" },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1, borderColor: colors.border, padding: 14, gap: 6 },
   row: { flexDirection: "row", justifyContent: "space-between", gap: 12, paddingVertical: 4 },
   rowLabel: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },

@@ -403,6 +403,40 @@ export function useAdjustCustomerLoyalty() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
   });
 }
+// ---- Staff corrections of a customer file (manager / phone) – identity + saved addresses, journaled server-side ----
+export function useUpdateCustomer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; first_name: string; last_name: string; phone: string; email?: string | null }) => api.put<User>(`/customers/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
+  });
+}
+export function useSaveCustomerAddress() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, addrId, ...body }: { id: string; addrId: string | null } & Omit<SavedAddress, "id">) =>
+      addrId ? api.put<User>(`/customers/${id}/addresses/${addrId}`, body) : api.post<User>(`/customers/${id}/addresses`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
+  });
+}
+export function useDeleteCustomerAddress() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, addrId }: { id: string; addrId: string }) => api.del<User>(`/customers/${id}/addresses/${addrId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["customers"] }),
+  });
+}
+/** Delivery address of an order still in progress (customer called back) – finished orders are refused by the server. */
+export function useUpdateOrderAddress() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & Address) => api.put<Order>(`/orders/${id}/address`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["customers"] });
+    },
+  });
+}
 /** CSV of opted-in customers (manager) – raw text, the screen downloads / shares it. */
 export async function fetchMarketingCsv(): Promise<string> {
   const res = await fetch(`${BASE}/customers/marketing-export.csv`, { headers: authHeaders() });

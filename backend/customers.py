@@ -16,9 +16,9 @@ from typing import Any, Dict, List, Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from auth import normalize_phone
+from auth import SavedAddress, UserOut, normalize_phone, user_out
 from database import db
 import loyalty as loyalty_mod
 
@@ -81,7 +81,7 @@ def _profile(key: str, first: str, last: str, phone: str, email: Optional[str], 
 
 
 async def build_profiles() -> Dict[str, dict]:
-    users = await db.users.find({}, {"password_hash": 1, "first_name": 1, "last_name": 1, "phone": 1, "email": 1, "addresses": 1, "created_at": 1}).to_list(10000)
+    users = await db.users.find({}, {"password_hash": 1, "first_name": 1, "last_name": 1, "phone": 1, "email": 1, "addresses": 1, "created_at": 1, "previous_phones": 1}).to_list(10000)
     orders = await db.orders.find({}, ORDER_PROJECTION).sort("created_at", -1).to_list(50000)
     consents = {c["phone"]: c async for c in db.marketing_consents.find({})}
     profiles: Dict[str, dict] = {}
@@ -91,10 +91,16 @@ async def build_profiles() -> Dict[str, dict]:
         kind = "account" if u.get("password_hash") else "staff"
         p = _profile(key, u.get("first_name", ""), u.get("last_name", ""), u.get("phone", ""), u.get("email"), kind, u.get("created_at"))
         p["addresses"] = [_addr(a) for a in u.get("addresses", [])]
+        p["previous_phones"] = [x for x in (normalize_phone(x) for x in u.get("previous_phones", [])) if x]
         profiles[key] = p
         d = normalize_phone(u.get("phone", ""))
         if d:
             by_phone[d] = key
+    for u in users:
+        # Staff corrected the number: guest orders placed with the former number stay attached (a customer who now
+        # owns that number wins – only numbers nobody uses any more are matched this way)
+        for d in profiles[str(u["_id"])]["previous_phones"]:
+            by_phone.setdefault(d, str(u["_id"]))
     for o in orders:  # newest first
         cust = o.get("customer") or {}
         d = normalize_phone(cust.get("phone", ""))
@@ -178,13 +184,20 @@ async def export_marketing_csv(_: dict = Depends(_roles("manager"))):
     return Response(content="\ufeff" + buf.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
+def _phone_regex(digits: str) -> dict:
+    return {"customer.phone": {"$regex": r"\D*".join(digits) + r"\D*$"}}
+
+
 def _order_query(p: dict) -> dict:
     digits = normalize_phone(p["phone"])
     ors: List[dict] = []
     if p["kind"] != "guest":
         ors.append({"user_id": p["key"]})
     if digits:
-        ors.append({"customer.phone": {"$regex": r"\D*".join(digits) + r"\D*$"}})
+        ors.append(_phone_regex(digits))
+    for old in p.get("previous_phones", []):
+        if old and old != digits:
+            ors.append(_phone_regex(old))
     if not ors:
         return {"_id": None}
     return {"$or": ors} if len(ors) > 1 else ors[0]
@@ -206,7 +219,106 @@ async def customer_profile(key: str, _: dict = Depends(_roles("manager", "phone"
     # Carte Fidélité: digital progress of this account (users created by staff for phone orders have one too once they order)
     loyalty = await loyalty_mod.summary(db, key) if p["kind"] in ("account", "staff") else None
     audit = await loyalty_audit(key) if loyalty is not None else []
-    return {**p, "orders": [_ser(d) for d in docs], "loyalty": loyalty, "loyalty_audit": audit}
+    # Editable data lives on the users document (guests have none): structured saved addresses + correction journal
+    u = await db.users.find_one({"_id": ObjectId(key)}, {"addresses": 1}) if loyalty is not None and ObjectId.is_valid(key) else None
+    changes = await customer_audit(key) if u else []
+    return {**p, "orders": [_ser(d) for d in docs], "loyalty": loyalty, "loyalty_audit": audit,
+            "saved_addresses": (u or {}).get("addresses", []), "changes_audit": changes}
+
+
+# ---------------------------------------------------------------------------
+# Staff corrections of a customer file (manager + phone): identity/contact + saved addresses.
+# Identity = users._id -> order history, Carte Fidélité and marketing consent follow the customer. Orders keep the
+# snapshot taken when they were placed (ticket / receipt as printed) – nothing in `orders` is rewritten here.
+# ---------------------------------------------------------------------------
+class CustomerEditIn(BaseModel):
+    first_name: str = Field(min_length=1)
+    last_name: str = ""
+    phone: str = Field(min_length=7)
+    email: Optional[str] = None
+
+
+def _addr_full(a: dict) -> str:
+    s = _addr(a)
+    return f"{s} – {a['instructions']}" if a.get("instructions") else s
+
+
+def _ser_change(a: dict) -> dict:
+    return {"id": str(a["_id"]), "changes": a["changes"], "manager": a.get("manager"), "at": a["at"].isoformat() if a.get("at") else None}
+
+
+async def customer_audit(user_id: str, limit: int = 5) -> List[dict]:
+    return [_ser_change(a) async for a in db.customer_audit.find({"user_id": user_id}).sort("at", -1).limit(limit)]
+
+
+async def _editable_customer(key: str) -> dict:
+    u = await db.users.find_one({"_id": ObjectId(key)}) if ObjectId.is_valid(key) else None
+    if not u:
+        raise HTTPException(404, "Client introuvable – seules les fiches client (compte ou client téléphone) sont modifiables")
+    return u
+
+
+async def _journal(u: dict, staff: dict, changes: List[dict]):
+    """Every staff correction is journaled: who changed what (previous -> new), when."""
+    await db.customer_audit.insert_one({
+        "user_id": str(u["_id"]), "customer": f"{u.get('first_name', '')} {u.get('last_name', '')}".strip(), "phone": u.get("phone"),
+        "changes": changes, "manager": staff.get("name") or staff.get("role"), "role": staff.get("role"), "at": datetime.now(timezone.utc),
+    })
+
+
+@router.put("/{key}", response_model=UserOut)
+async def staff_update_customer(key: str, body: CustomerEditIn, staff: dict = Depends(_roles("manager", "phone"))):
+    """Correct name / phone / e-mail of a customer file (typo while taking a phone order, new number).
+    Phone change: the number must not belong to another customer (409); the marketing-consent record follows the
+    number; the former number is kept in `previous_phones` so guest orders placed with it stay in the history.
+    An account holder simply logs in with the new number afterwards (password unchanged)."""
+    u = await _editable_customer(key)
+    phone = normalize_phone(body.phone)
+    if len(phone) < 7:
+        raise HTTPException(400, "Numéro de téléphone invalide")
+    if await db.users.find_one({"phone": phone, "_id": {"$ne": u["_id"]}}):
+        raise HTTPException(409, "Ce numéro est déjà utilisé par un autre client")
+    upd = {"first_name": body.first_name.strip(), "last_name": body.last_name.strip(), "phone": phone, "email": (body.email or "").strip().lower() or None}
+    changes = [{"field": k, "previous": u.get(k) or "", "new": v or ""} for k, v in upd.items() if (u.get(k) or "") != (v or "")]
+    if not changes:
+        return user_out(u)
+    update: Dict[str, Any] = {"$set": upd}
+    old_phone = u.get("phone", "")
+    if old_phone and old_phone != phone:
+        update["$addToSet"] = {"previous_phones": old_phone}
+        if await db.marketing_consents.find_one({"phone": phone}):
+            await db.marketing_consents.delete_one({"phone": old_phone})  # the new number already has its own record
+        else:
+            await db.marketing_consents.update_one({"phone": old_phone}, {"$set": {"phone": phone}})
+    await db.users.update_one({"_id": u["_id"]}, update)
+    await _journal(u, staff, changes)
+    return user_out(await db.users.find_one({"_id": u["_id"]}))
+
+
+@router.put("/{key}/addresses/{addr_id}", response_model=UserOut)
+async def staff_update_address(key: str, addr_id: str, body: SavedAddress, staff: dict = Depends(_roles("manager", "phone"))):
+    """Correct a saved delivery address (street, number, NPA, city, instructions) of a customer file."""
+    u = await _editable_customer(key)
+    prev = next((a for a in u.get("addresses", []) if a.get("id") == addr_id), None)
+    if not prev:
+        raise HTTPException(404, "Adresse introuvable")
+    addr = body.model_dump()
+    addr["id"] = addr_id
+    await db.users.update_one({"_id": u["_id"], "addresses.id": addr_id}, {"$set": {"addresses.$": addr}})
+    if _addr_full(prev) != _addr_full(addr) or (prev.get("label") or "") != (addr.get("label") or ""):
+        await _journal(u, staff, [{"field": "address", "previous": _addr_full(prev), "new": _addr_full(addr)}])
+    return user_out(await db.users.find_one({"_id": u["_id"]}))
+
+
+@router.delete("/{key}/addresses/{addr_id}", response_model=UserOut)
+async def staff_delete_address(key: str, addr_id: str, staff: dict = Depends(_roles("manager", "phone"))):
+    u = await _editable_customer(key)
+    prev = next((a for a in u.get("addresses", []) if a.get("id") == addr_id), None)
+    if not prev:
+        raise HTTPException(404, "Adresse introuvable")
+    await db.users.update_one({"_id": u["_id"]}, {"$pull": {"addresses": {"id": addr_id}}})
+    await _journal(u, staff, [{"field": "address", "previous": _addr_full(prev), "new": ""}])
+    return user_out(await db.users.find_one({"_id": u["_id"]}))
 
 
 class MarketingIn(BaseModel):

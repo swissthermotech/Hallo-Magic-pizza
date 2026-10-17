@@ -519,6 +519,8 @@ class Order(BaseDocument):
     printnode_job_id: Optional[str] = None
     last_print_error: Optional[str] = None
     client_request_id: Optional[str] = None  # idempotency key (phone orders double-tap)
+    address_updated_at: Optional[datetime] = None  # staff corrected the delivery address while the order was in progress
+    address_updated_by: Optional[str] = None
     subtotal: float
     extras_total: float
     delivery_fee: float
@@ -1334,6 +1336,33 @@ async def assign_driver(order_id: str, body: AssignIn, _: dict = Depends(STAFF))
         notif = make_notification("assigned", doc["order_number"]) if doc["status"] == "ready" else None
         return await push_status(doc, "assigned", notif, fields)
     new = await db.orders.find_one_and_update({"_id": doc["_id"]}, {"$set": fields}, return_document=ReturnDocument.AFTER)
+    return Order.from_mongo(new)
+
+
+@api.put("/orders/{order_id}/address", response_model=Order)
+async def update_order_address(order_id: str, body: AddressIn, staff: dict = Depends(PHONE)):
+    """Staff correction of the delivery address of an order STILL IN PROGRESS (the customer called back with the right
+    street / NPA / instructions). Finished, delivered or cancelled orders are never modified – they keep the snapshot
+    printed on ticket and receipt. The replaced address stays on the order (`address_history`) for traceability.
+    Delivery fee is flat (zones only carry the minimum order), so totals are untouched; the zone must still be served."""
+    doc = await load_order(order_id)
+    if doc["type"] != "delivery":
+        raise HTTPException(400, "Seules les commandes en livraison ont une adresse")
+    if doc["status"] in TERMINAL or doc["status"] == "delivered":
+        raise HTTPException(409, "Commande terminée – l'adresse n'est plus modifiable")
+    addr = {"street": body.street.strip(), "number": body.number.strip(), "npa": body.npa.strip(), "city": body.city.strip(),
+            "instructions": (body.instructions or "").strip() or None}
+    if not addr["street"] or not addr["npa"] or not addr["city"]:
+        raise HTTPException(400, "Rue, NPA et localité sont obligatoires")
+    settings = await get_settings()
+    if settings.delivery_zones and not any(z.npa == addr["npa"] for z in settings.delivery_zones):
+        raise HTTPException(400, "Zone de livraison non desservie")
+    at = now_utc()
+    new = await db.orders.find_one_and_update(
+        {"_id": doc["_id"]},
+        {"$set": {"address": addr, "address_updated_at": at, "address_updated_by": staff.get("name") or staff.get("role")},
+         "$push": {"address_history": {**(doc.get("address") or {}), "replaced_at": at}}},
+        return_document=ReturnDocument.AFTER)
     return Order.from_mongo(new)
 
 

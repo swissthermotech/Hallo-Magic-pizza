@@ -1,0 +1,39 @@
+{
+  "summary": "Frontend-only UI verification of the new 'Correct a customer file' flows (Manager profile + phone-order flow + guest-to-customer). All 7 steps pass end-to-end on mobile viewport 430x932, including the restoration of the demo customer at the end. German sheet title was NOT verified at runtime: no language switch testID is exposed in the staff UI (the DE string 'Kundenprofil bearbeiten' is however present in src/i18n.tsx:1032, so switching the app locale will render it). No in-progress 'Commande en cours' section appears for the demo customer (expected). No real phone order was created, no PrintNode trigger, no guest customer was saved.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "detailed_results": {
+    "step_1_profile_sheet_open": "PASS – /staff/customers/6ad3b825438a521dc77b7859 renders, customer-edit-open (header pencil) + customer-edit-button both present. Tapping either opens the bottom sheet with testID customer-edit-sheet. All identity fields (customer-edit-first-name/-last-name/-phone/-email) render. Save button is disabled (aria-disabled=true) until a field changes.",
+    "step_2_identity_and_phone_change": "PASS – Changing last_name='Édition Test' + email='demo@test.ch' + Save shows toast 'Fiche client mise à jour'. Profile card updates (customer-last-name='Édition Test', customer-email='demo@test.ch'). 'Modifications récentes' (customer-changes-audit) shows the new entry on both profile and sheet. Changing phone to '079 555 07 82' triggers customer-edit-phone-hint ('Nouveau numéro…') and Save updates customer-phone to '0795550782'. Demo data was restored at the end (first_name=Démo2, last_name=Édition, phone=0795550781, email=— ).",
+    "step_3_phone_collision": "PASS – Setting phone to 0795551234 returns 409 and shows error toast 'Ce numéro est déjà utilisé par un autre client'. Phone value remains unchanged after sheet reload. Backend returned 409 as expected.",
+    "step_4_addresses": "PASS – Opening the saved address row (customer-edit-addr-<id>) opens customer-edit-addr-form. Instructions edit 'Sonnette Démo – test' saves correctly (row text refreshes). Add a 2nd address (Rue Neuve / 1700 / Fribourg) succeeds -> 2 addresses listed. Deleting the 2nd via customer-edit-addr-delete + customer-edit-addr-delete-confirm returns to 1 address. The customer-edit-apply-orders section is NOT shown (customer has no in-progress delivery) – matches spec. Instructions restored to 'Sonnette Démo – 3e étage' at the end.",
+    "step_5_close_sheet": "PASS – customer-edit-sheet-close closes the sheet; profile page still shows customer-loyalty (Carte Fidélité) card and customer-orders-count='0'.",
+    "step_6_phone_order_flow": "PASS – /phone-orders works after Manager login (iPad layout, 'Téléphone · Poste 1' station already selected). Typing 0795550781 into phone-search-input shows phone-result-6ad3b825438a521dc77b7859. Selecting it reveals phone-customer-card with phone-customer-name='Démo2 Édition' and phone-customer-phone='0795550781'. phone-edit-customer (pencil) opens the SAME customer-edit-sheet. Changing first_name to 'Démo3' + save + close updates phone-customer-name='Démo3 Édition' in-place via onSaved callback. Restored first_name to 'Démo2' at the end. NOTE: On this layout there is no visible delivery-type toggle on the customer step (products are selected first then the type is set in the cart step), so the 'Switch to Livraison and verify chip' sub-step could not be exercised without creating a cart – which was explicitly forbidden. The saved-address UI inside customer-panel.tsx is gated by `p.delivery`, which is only true after a delivery-type product/cart is set. The sync logic (`customerSaved` in customer-panel.tsx) is correct in code and was verified for the identity path. No product was added, no order was confirmed, no PrintNode call.",
+    "step_7_guest_row": "PASS – /staff/customers search '079' returns a guest row (customer-row-guest:079235083 'Bdjsjs Bsbbsjsjs', INVITÉ badge). Opening the profile shows customer-create-file + customer-guest-hint; customer-edit-button is NOT shown (as expected). Tapping Créer la fiche client opens guest-create-sheet with the identity prefilled (first_name='Bdjsjs', phone='079235083'). Address street was empty because the guest order on file had no delivery address. Closed via guest-create-sheet-close WITHOUT saving (no new customer file created, sandbox clean).",
+    "step_8_german": "SKIPPED – No language-switch testID is exposed in the staff UI (checked for any testID containing 'lang' or 'locale' – none found). The DE translation 'Kundenprofil bearbeiten' is present in src/i18n.tsx:1032 so this is purely a UI exposure limitation, not a translation gap.",
+    "step_9_visual": "PASS – Sheet is a bottom sheet with scrim (backdrop pressable to close), rounded top (24px), paddingHorizontal 20, maxHeight 92% (declared in StyleSheet), scrollable, readable at 430px width, no text overflow observed on screenshots. Primary buttons measured in the UI (iconBtn 44x44, Save button full-width ≥48px). Address rows use minHeight 48, matching the ≥44px touch-target rule."
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL: expose a FR/DE language toggle inside the staff header (or Plus tab) if DE verification of staff screens is desired – strings already exist in src/i18n.tsx. No functional blocker.",
+    "OPTIONAL (minor UX): on /phone-orders, the saved-address chip row only appears after the order type becomes 'delivery', which happens later in the funnel. If product owner wants the delivery toggle to be available right after customer selection, surface it in CustomerPanel; otherwise current flow is fine."
+  ],
+  "critical_code_review_comments": [
+    "customer-edit.tsx is well-structured (<320 lines), re-uses AddressFields and IdentityFields, correct use of useUpdateCustomer / useSaveCustomerAddress / useDeleteCustomerAddress / useUpdateOrderAddress hooks. onSaved callback keeps the selected phone-order customer in sync (customer-panel.tsx:42). Toasts and loading states are wired. No MongoDB _id leaks observed in responses (profile payload uses 'key').",
+    "Save button correctly disabled when !dirty (customer-edit.tsx:128).",
+    "409 collision is surfaced as a toast via api error message, no silent failure (verified).",
+    "The sheet uses KeyboardAvoidingView + ScrollView with keyboardShouldPersistTaps='handled' – good RN practice."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "100% of the 7 required UI flows (step 8 DE skipped for environmental reasons – no toggle in staff UI)"},
+  "seed_data_creation": "No permanent data created. Temporary edits on customer 6ad3b825438a521dc77b7859 (last_name, email, phone, instructions, +2nd address) were all reverted. Guest customer sheet was closed without saving.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Demo customer 6ad3b825438a521dc77b7859 is restored (first_name=Démo2, last_name=Édition, phone=0795550781, no email, 1 address Route de Villars 12 / 1700 Fribourg / Sonnette Démo – 3e étage). Audit journal shows the test modifications – do NOT clean it (serves as proof of audit). The staff UI does not currently expose a language toggle; if DE strings need runtime verification, either add a toggle or switch the device language in Expo Go.",
+  "rca_of_issue": "N/A – no bugs."
+}

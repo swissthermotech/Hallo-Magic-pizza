@@ -218,7 +218,8 @@ async def delete_me(body: DeleteMeIn, user=Depends(current_user)):
         raise HTTPException(403, "Mot de passe incorrect")
     uid = str(user["_id"])
     digits = normalize_phone(user.get("phone", ""))
-    scope = {"$or": [{"user_id": uid}] + ([{"customer.phone": {"$regex": re.escape(digits[-9:]) + "$"}}] if len(digits) >= 9 else [])}
+    numbers = [d for d in [digits] + [normalize_phone(p) for p in user.get("previous_phones", [])] if len(d) >= 9]  # incl. numbers corrected by staff
+    scope = {"$or": [{"user_id": uid}] + [{"customer.phone": {"$regex": re.escape(d[-9:]) + "$"}} for d in numbers]}
     active = await db.orders.count_documents({**scope, "status": {"$in": ACTIVE_ORDER_STATUSES}})
     if active:
         raise HTTPException(409, "Une commande est encore en cours – la suppression sera possible une fois la commande terminée")

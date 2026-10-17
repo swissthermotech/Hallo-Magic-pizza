@@ -6,11 +6,9 @@ import { makeStyles, useTheme } from "@/src/theme";
 import { useI18n } from "@/src/i18n";
 import { customersApi, useCustomerSearch } from "@/src/api";
 import { Button, Chip, Field, FONT_DISPLAY, FONT_TEXT, useToast } from "@/src/components/ui";
-import type { Order, SavedAddress, User } from "@/src/types";
-
-export type OrderAddress = { street: string; number: string; npa: string; city: string; instructions: string };
-export const emptyAddress = (): OrderAddress => ({ street: "", number: "", npa: "", city: "", instructions: "" });
-const fromSaved = (a: SavedAddress): OrderAddress => ({ street: a.street, number: a.number, npa: a.npa, city: a.city, instructions: a.instructions || "" });
+import { AddressFields, emptyAddress, fromSaved, type OrderAddress } from "@/src/components/phone/address-fields";
+import { CustomerEditSheet } from "@/src/components/customer-edit";
+import type { Order, User } from "@/src/types";
 
 interface Props {
   customer: User | null;
@@ -38,6 +36,21 @@ export function CustomerPanel(p: Props) {
   const [busy, setBusy] = useState(false);
   const setN = (k: keyof typeof nf) => (v: string) => setNf((x) => ({ ...x, [k]: v }));
   const [editAddr, setEditAddr] = useState(false);
+  const [editCustomer, setEditCustomer] = useState(false);
+
+  // Staff corrected the customer file (name / phone / addresses): keep the selected customer and the chosen address in sync
+  const customerSaved = (u: User) => {
+    p.onCustomer(u);
+    const chosen = p.savedAddrId ? u.addresses.find((a) => a.id === p.savedAddrId) : undefined;
+    if (chosen) {
+      p.onAddress(fromSaved(chosen));
+    } else if (p.savedAddrId || (!p.address.street && u.addresses.length)) {
+      // chosen address deleted, or an address was just added for a customer without one -> use the first / newest one
+      const next = p.savedAddrId ? u.addresses[0] : u.addresses[u.addresses.length - 1];
+      p.onSavedAddr(next ? next.id : null);
+      p.onAddress(next ? fromSaved(next) : emptyAddress());
+    }
+  };
 
   // Guest orders matching the number -> offer their details as a "new customer" prefill
   const guestHint = useMemo(() => {
@@ -94,10 +107,14 @@ export function CustomerPanel(p: Props) {
           <View style={{ flex: 1 }}>
             <Text style={styles.kicker}>{t("existingCustomer")}</Text>
             <Text style={styles.name} testID="phone-customer-name">{u.first_name} {u.last_name}</Text>
-            <Text style={styles.info}>{u.phone}{u.email ? ` · ${u.email}` : ""}</Text>
+            <Text style={styles.info} testID="phone-customer-phone">{u.phone}{u.email ? ` · ${u.email}` : ""}</Text>
           </View>
+          <Pressable testID="phone-edit-customer" onPress={() => setEditCustomer(true)} style={styles.iconBtn} hitSlop={6} accessibilityRole="button" accessibilityLabel={t("editCustomer")}>
+            <Feather name="edit-2" size={18} color={colors.onSurface} />
+          </Pressable>
           <Button title={t("changeCustomer")} variant="outline" icon="x" onPress={() => { p.onCustomer(null); p.onAddress(emptyAddress()); p.onSavedAddr(null); }} testID="phone-change-customer" />
         </View>
+        <CustomerEditSheet customerId={u.id} visible={editCustomer} onClose={() => setEditCustomer(false)} onSaved={customerSaved} />
         {p.delivery ? (
           <View style={{ gap: 10, marginTop: 12 }}>
             <Text style={styles.kicker}>{t("deliveryAddress")}</Text>
@@ -185,31 +202,13 @@ export function CustomerPanel(p: Props) {
   );
 }
 
-export function AddressFields({ a, onChange, prefix }: { a: OrderAddress; onChange: (a: OrderAddress) => void; prefix: string }) {
-  const styles = useStyles();
-  const { t } = useI18n();
-  const set = (k: keyof OrderAddress) => (v: string) => onChange({ ...a, [k]: v });
-  return (
-    <View style={{ gap: 10 }}>
-      <View style={styles.two}>
-        <Field label={`${t("street")} *`} value={a.street} onChangeText={set("street")} style={{ flex: 3 }} testID={`${prefix}-street`} />
-        <Field label={t("number")} value={a.number} onChangeText={set("number")} style={{ flex: 1 }} testID={`${prefix}-number`} />
-      </View>
-      <View style={styles.two}>
-        <Field label={`${t("npa")} *`} value={a.npa} onChangeText={set("npa")} keyboardType="number-pad" style={{ flex: 1 }} testID={`${prefix}-npa`} />
-        <Field label={`${t("city")} *`} value={a.city} onChangeText={set("city")} style={{ flex: 2 }} testID={`${prefix}-city`} />
-      </View>
-      <Field label={t("deliveryInstructions")} value={a.instructions} onChangeText={set("instructions")} testID={`${prefix}-instructions`} />
-    </View>
-  );
-}
-
 const useStyles = makeStyles((colors) => ({
   searchWrap: { flexDirection: "row", alignItems: "center", gap: 12, height: 64, borderRadius: 18, backgroundColor: colors.surfaceSecondary, borderWidth: 2, borderColor: colors.brandPrimary, paddingHorizontal: 18 },
   searchInput: { flex: 1, fontFamily: FONT_TEXT, fontSize: 24, fontWeight: "800", color: colors.onSurface, height: 64, letterSpacing: 1 },
   hint: { fontFamily: FONT_TEXT, fontSize: 13, color: colors.muted },
   kicker: { fontFamily: FONT_TEXT, fontSize: 11, fontWeight: "800", color: colors.muted, textTransform: "uppercase", letterSpacing: 0.8 },
   card: { backgroundColor: colors.surfaceSecondary, borderRadius: 18, borderWidth: 1, borderColor: colors.border, padding: 16, gap: 10 },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.surface, borderWidth: 1.5, borderColor: colors.borderStrong, alignItems: "center", justifyContent: "center" },
   result: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.surfaceSecondary, borderRadius: 16, borderWidth: 1.5, borderColor: colors.border, padding: 14, minHeight: 64 },
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.brandSoft, alignItems: "center", justifyContent: "center" },
   avatarText: { fontFamily: FONT_DISPLAY, fontSize: 20, color: colors.brandPrimary },

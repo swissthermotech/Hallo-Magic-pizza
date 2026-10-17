@@ -128,10 +128,19 @@ export interface LoyaltyAuditEntry {
   manager?: string | null;
   at?: string | null;
 }
+/** Staff correction of a customer file (name / phone / e-mail / saved address) – journaled server-side. */
+export interface CustomerChangeAudit {
+  id: string;
+  changes: { field: string; previous: string; new: string }[];
+  manager?: string | null;
+  at?: string | null;
+}
 export interface CustomerProfile extends CustomerSummary {
   orders: Order[];
   loyalty?: LoyaltySummary | null;
   loyalty_audit?: LoyaltyAuditEntry[];
+  saved_addresses?: SavedAddress[]; // editable addresses of the users document (accounts / phone customers)
+  changes_audit?: CustomerChangeAudit[];
 }
 
 export interface DeliveryZone {
@@ -308,6 +317,7 @@ export interface Order {
   age_confirmed: boolean;
   age_required?: 16 | 18 | null;
   user_id?: string | null;
+  address_updated_at?: string | null; // staff corrected the delivery address while the order was in progress
   loyalty?: LoyaltyOrderInfo | null;
   marketing_consent?: boolean | null;
   station?: number | null;
