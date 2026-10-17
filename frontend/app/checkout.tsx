@@ -154,12 +154,18 @@ export default function CheckoutScreen() {
   // The sticky bar now carries the order-type summary -> measure its real height for the scroll padding / keyboard offset
   const [ctaH, setCtaH] = useState(CTA_H);
   const keyboardOpen = useKeyboardState((s) => s.isVisible);
-  // "Modifier" links of the summary scroll back to the section concerned (same screen – cart and form untouched)
+  // "Modifier" links of the summary scroll back to the section concerned (same screen – cart and form untouched).
+  // Positions are measured at tap time (web only reports size changes through onLayout, not position changes).
   const scrollRef = useRef<KeyboardAwareScrollViewRef>(null);
-  const sectionY = useRef<{ time: number; customer: number; address: number }>({ time: 0, customer: 0, address: 0 });
+  const topRef = useRef<View>(null);
+  const timeRef = useRef<View>(null);
+  const addressRef = useRef<View>(null);
   const scrollToSection = (k: "time" | "address") => {
-    const y = k === "time" ? sectionY.current.time : sectionY.current.customer + sectionY.current.address;
-    scrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+    const node = k === "time" ? timeRef.current : addressRef.current;
+    if (!node || !topRef.current) return;
+    topRef.current.measureInWindow((_tx, topY) => {
+      node.measureInWindow((_x, y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - topY + 8), animated: true }));
+    });
   };
   const addressText = [`${f.street.trim()} ${f.number.trim()}`.trim(), `${f.npa.trim()} ${f.city.trim()}`.trim()].filter(Boolean).join(", ");
   const addressMissing = type === "delivery" && (!f.street.trim() || !f.npa.trim() || !f.city.trim());
@@ -175,7 +181,9 @@ export default function CheckoutScreen() {
       <ScreenHeader title={t("checkout")} subtitle={`${cart.count} ${t("items").toLowerCase()} · ${chf(goods)}`} testID="checkout-title" />
       <KeyboardAwareScrollView ref={scrollRef} contentContainerStyle={{ padding: 16, paddingBottom: ctaH + 16, gap: 20, width: "100%", maxWidth: 760, alignSelf: "center" }} bottomOffset={ctaH + 16} showsVerticalScrollIndicator={false}>
         {/* Order type */}
-        <OrderTypeSelector />
+        <View ref={topRef}>
+          <OrderTypeSelector />
+        </View>
         {type === "delivery" && settings ? (
           <Text style={[styles.hint, (belowMin || zoneMissing) && { color: colors.error }]} testID="delivery-min-hint">
             {zoneMissing
@@ -185,7 +193,7 @@ export default function CheckoutScreen() {
         ) : null}
 
         {/* Time */}
-        <View onLayout={(e) => { sectionY.current.time = e.nativeEvent.layout.y; }} testID="checkout-time-section">
+        <View ref={timeRef} testID="checkout-time-section">
           <Text style={styles.sectionTitle}>{t("desiredTime")}</Text>
           {closedToday ? (
             <View style={styles.closedBox} testID="checkout-closed-today">
@@ -244,7 +252,7 @@ export default function CheckoutScreen() {
         </View>
 
         {/* Customer */}
-        <View style={{ gap: 12 }} onLayout={(e) => { sectionY.current.customer = e.nativeEvent.layout.y; }}>
+        <View style={{ gap: 12 }}>
           <Text style={styles.sectionTitle}>{t("yourDetails")}</Text>
           <View style={styles.two}>
             <Field label={`${t("firstName")} *`} value={f.first_name} onChangeText={set("first_name")} style={{ flex: 1 }} testID="checkout-first-name" autoCapitalize="words" />
@@ -266,7 +274,7 @@ export default function CheckoutScreen() {
             </View>
           ) : null}
           {type === "delivery" ? (
-            <View style={{ gap: 12 }} onLayout={(e) => { sectionY.current.address = e.nativeEvent.layout.y; }} testID="checkout-address-section">
+            <View style={{ gap: 12 }} ref={addressRef} testID="checkout-address-section">
               <View style={styles.two}>
                 <Field label={`${t("street")} *`} value={f.street} onChangeText={set("street")} style={{ flex: 3 }} testID="checkout-street" />
                 <Field label={t("number")} value={f.number} onChangeText={set("number")} style={{ flex: 1 }} testID="checkout-number" />

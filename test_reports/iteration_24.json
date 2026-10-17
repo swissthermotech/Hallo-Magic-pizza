@@ -1,0 +1,26 @@
+{
+  "summary": "Full E2E verification of the new order-type summary block above the checkout CTA and on the order status page (Iteration 34 UX). All 8 requested checks pass: delivery/pickup pills with correct colors, red missing-address/time states, address/time Modifier links scroll back to their sections while preserving typed address + cart, pickup toggle hides address row, pickup submit → no popup → /order/<id> with full repeated banner (RETRAIT SUR PLACE #1987, 17.10.2026 · Dès que possible, CHF 4.00, badge 'En attente de confirmation'), delivery submit → #1989 LIVRAISON with address 'Route de Villars 12, 1700 Fribourg' and 'Livraison souhaitée: 17.10.2026 · 21:15', duplicate protection (rapid 2x JS clicks on confirm) → exactly ONE order (#1988) created and single /order/<id> landing. Sticky bar (summary + CTA + hint) fully visible at 390 and 430 widths with no clipping; Modifier links are 24px tall (hitSlop=10 → ~44px effective). All 4 created pending orders deleted from Mongo (0 remaining with the test email).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/checkout (OrderTypeSelector at 390 width)", "issues": ["The compact 'LIVRAISON' pill in the top OrderTypeSelector wraps to two lines ('LIVRAISO' / 'N') on 390x844 — pre-existing component (not the new order-type summary which is unaffected and renders cleanly). Minor polish, no action required for this feature."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/tmp/pickup_ok.png", "/tmp/vis_390_delivery.png", "/tmp/vis_430_delivery.png"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "order-type-summary.tsx and checkout.tsx are clean: strict testIDs on pill/text/edit rows, StyleSheet-only, Text wrappers everywhere, no raw HTML or deprecated expo-av. Delivery/pickup colors use brandPrimary / brandSecondary with onBrandPrimary/onBrandSecondary foreground for AA contrast on the red/olive pills.",
+    "Idempotency: clientOrderId.useRef is rotated only after a successful place → double-click reuses the same key → single order confirmed in Mongo (step 6).",
+    "scrollToSection uses measureInWindow against topRef to compute the final y — works on web (verified: both target sections ended at y≈78 after Modifier tap)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not retested per request)", "frontend": "100%"},
+  "seed_data_creation": "Created and cleaned up 4 pending orders (#1986, #1987 pickup; #1988 pickup duplicate test; #1989 delivery) all with customer.email 'test-summary@example.ch'. Verified db.orders.count_documents({'customer.email': 'test-summary@example.ch'}) == 0 after cleanup. No order was ever accepted/printed — PrintNode safe.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Checkout flow: Menu (/) → tap home-order-type-{pickup|delivery} → category-chip-boissons → product-add-6aa94a928068d15c2420fa0c (Coca-Cola pet, non-customizable, CHF 4) → tab text 'Panier' → cart-checkout-button → wait for checkout-type-summary. Field inputs have the testID directly ON the <input> (not a wrapper), so use page.fill('[data-testid=\"checkout-first-name\"]', ...). Delivery to NPA 1700 Fribourg requires ≥CHF 30 minimum — add 8× Coca-Cola to reach it. Double-click duplicate test must dispatch two clicks via JS (page.evaluate) to beat the Button's internal debouncing.",
+  "rca_of_issue": "No bug — feature verification pass."
+}
